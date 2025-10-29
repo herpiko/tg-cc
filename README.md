@@ -154,7 +154,7 @@ Fix bugs in a specific project (currently placeholder).
    - `--system-prompt` with command-specific rules
 5. Bot tracks execution time
 6. Bot sends results back to the chat
-7. Output is saved to `output.txt` with execution time appended
+7. Output is saved to `/tmp/output_*.txt` with execution time appended
 
 ## Authorization
 

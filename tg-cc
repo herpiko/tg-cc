@@ -72,6 +72,93 @@ def is_authorized(update: Update) -> bool:
 
     return user_authorized and group_authorized
 
+async def run_claude_command(cmd, cwd, request_uuid):
+    """Execute Claude command and return result with timing."""
+    start_time = datetime.now()
+
+    result = subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=1800
+    )
+
+    end_time = datetime.now()
+    duration_minutes = (end_time - start_time).total_seconds() / 60
+
+    logger.info(f"Command stdout: {result.stdout}")
+    logger.info(f"Command stderr: {result.stderr}")
+    logger.info(f"Return code: {result.returncode}")
+    logger.info(f"Duration: {duration_minutes:.2f} minutes")
+
+    return result, duration_minutes
+
+async def process_output_file(update, output_file, duration_minutes):
+    """Process output file and send to user with cleanup."""
+    if os.path.exists(output_file):
+        with open(output_file, 'a') as f:
+            f.write(f"\n\nExecution time: {duration_minutes:.2f} minutes")
+
+    if os.path.exists(output_file):
+        with open(output_file, 'r') as f:
+            output_content = f.read()
+
+        if output_content:
+            if len(output_content) > 4000:
+                await update.message.reply_text(output_content[:4000] + "\n\n[Output truncated...]")
+            else:
+                await update.message.reply_text(output_content)
+        else:
+            await update.message.reply_text(f"Command completed but {output_file} is empty")
+
+        os.remove(output_file)
+        logger.info(f"Cleaned up {output_file}")
+    else:
+        await update.message.reply_text(f"Error: {output_file} was not created by Claude")
+
+def cleanup_output_file(output_file):
+    """Clean up output file if it exists."""
+    if os.path.exists(output_file):
+        os.remove(output_file)
+        logger.info(f"Cleaned up {output_file}")
+
+async def clone_repository_if_needed(update, project_repo, project_workdir):
+    """Clone repository if project directory doesn't exist."""
+    if not os.path.exists(project_workdir):
+        await update.message.reply_text(f"Project directory not found. Cloning {project_repo}...")
+        logger.info(f"Cloning {project_repo} into {project_workdir}")
+
+        try:
+            parent_dir = os.path.dirname(project_workdir)
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, exist_ok=True)
+
+            clone_result = subprocess.run(
+                ["git", "clone", project_repo, project_workdir],
+                capture_output=True,
+                text=True,
+                timeout=1800
+            )
+
+            if clone_result.returncode != 0:
+                await update.message.reply_text(f"Failed to clone repository:\n{clone_result.stderr[:500]}")
+                return False
+
+            await update.message.reply_text(f"Repository cloned successfully!")
+            logger.info(f"Successfully cloned {project_repo}")
+            return True
+
+        except subprocess.TimeoutExpired:
+            await update.message.reply_text("Git clone timed out after 30 minutes")
+            return False
+        except Exception as e:
+            logger.error(f"Error cloning repository: {e}")
+            await update.message.reply_text(f"Error cloning repository: {str(e)}")
+            return False
+
+    return True
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle all messages and reply if bot is mentioned."""
     if not is_authorized(update):
@@ -143,72 +230,25 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Processing...")
 
     request_uuid = str(uuid.uuid4())
-    start_time = datetime.now()
+    output_file = f"/tmp/output_{request_uuid}.txt"
 
     try:
-        output_filename = f"output_{request_uuid}.txt"
-        prompt = f"{user_text}\n\nWrite the output in {output_filename}"
-
+        prompt = f"{user_text}\n\nWrite the output in {output_file}"
         cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", ASK_RULES, prompt]
 
-        logger.info(f"Running command with UUID {request_uuid}: {' '.join(cmd)}")
-
+        logger.info(f"Running command with UUID {request_uuid}")
         bot_dir = os.path.dirname(os.path.abspath(__file__))
 
-        result = subprocess.run(
-            cmd,
-            cwd=bot_dir,
-            capture_output=True,
-            text=True,
-            timeout=1800
-        )
-
-        end_time = datetime.now()
-        duration_minutes = (end_time - start_time).total_seconds() / 60
-
-        logger.info(f"Command stdout: {result.stdout}")
-        logger.info(f"Command stderr: {result.stderr}")
-        logger.info(f"Return code: {result.returncode}")
-        logger.info(f"Duration: {duration_minutes:.2f} minutes")
-
-        output_file = os.path.join(bot_dir, output_filename)
-
-        if os.path.exists(output_file):
-            with open(output_file, 'a') as f:
-                f.write(f"\n\nExecution time: {duration_minutes:.2f} minutes")
-
-        if os.path.exists(output_file):
-            with open(output_file, 'r') as f:
-                output_content = f.read()
-
-            if output_content:
-                if len(output_content) > 4000:
-                    await update.message.reply_text(output_content[:4000] + "\n\n[Output truncated...]")
-                else:
-                    await update.message.reply_text(output_content)
-            else:
-                await update.message.reply_text("Command completed but output.txt is empty")
-
-            os.remove(output_file)
-            logger.info(f"Cleaned up {output_filename}")
-        else:
-            response = result.stdout if result.stdout else result.stderr
-            if response:
-                await update.message.reply_text(f"Command output:\n{response[:4000]}")
-            else:
-                await update.message.reply_text("Command completed")
+        result, duration_minutes = await run_claude_command(cmd, bot_dir, request_uuid)
+        await process_output_file(update, output_file, duration_minutes)
 
     except subprocess.TimeoutExpired:
         await update.message.reply_text("Command timed out after 30 minutes")
-        if 'output_file' in locals() and os.path.exists(output_file):
-            os.remove(output_file)
-            logger.info(f"Cleaned up {output_filename} after timeout")
+        cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running command: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
-        if 'output_file' in locals() and os.path.exists(output_file):
-            os.remove(output_file)
-            logger.info(f"Cleaned up {output_filename} after error")
+        cleanup_output_file(output_file)
 
 async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /feat command. Format: /feat project-name prompt"""
@@ -241,115 +281,39 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
-    if not os.path.exists(project_workdir):
-        await update.message.reply_text(f"Project directory not found. Cloning {project_repo}...")
-        logger.info(f"Cloning {project_repo} into {project_workdir}")
-
-        try:
-            parent_dir = os.path.dirname(project_workdir)
-            if parent_dir and not os.path.exists(parent_dir):
-                os.makedirs(parent_dir, exist_ok=True)
-
-            clone_result = subprocess.run(
-                ["git", "clone", project_repo, project_workdir],
-                capture_output=True,
-                text=True,
-                timeout=1800
-            )
-
-            if clone_result.returncode != 0:
-                await update.message.reply_text(f"Failed to clone repository:\n{clone_result.stderr[:500]}")
-                return
-
-            await update.message.reply_text(f"Repository cloned successfully!")
-            logger.info(f"Successfully cloned {project_repo}")
-
-        except subprocess.TimeoutExpired:
-            await update.message.reply_text("Git clone timed out after 30 minutes")
-            return
-        except Exception as e:
-            logger.error(f"Error cloning repository: {e}")
-            await update.message.reply_text(f"Error cloning repository: {str(e)}")
-            return
+    if not await clone_repository_if_needed(update, project_repo, project_workdir):
+        return
 
     await update.message.reply_text(f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
-    start_time = datetime.now()
+    output_file = f"/tmp/output_{request_uuid}.txt"
 
     try:
-        output_filename = f"output_{request_uuid}.txt"
         prompt = f"""Project: {project_name}
 Repository: {project_repo}
 Working Directory: {project_workdir}
 
 Task: {user_prompt}
 
-Write the output in {output_filename}"""
+Write the output in {output_file}"""
 
         cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", FEAT_RULES, prompt]
+        logger.info(f"Running command for project {project_name} with UUID {request_uuid}")
 
-        logger.info(f"Running command for project {project_name} with UUID {request_uuid}: {' '.join(cmd)}")
-
-        bot_dir = os.path.dirname(os.path.abspath(__file__))
-
-        result = subprocess.run(
-            cmd,
-            cwd=project_workdir,
-            capture_output=True,
-            text=True,
-            timeout=1800
-        )
-
-        end_time = datetime.now()
-        duration_minutes = (end_time - start_time).total_seconds() / 60
-
-        logger.info(f"Command stdout: {result.stdout}")
-        logger.info(f"Command stderr: {result.stderr}")
-        logger.info(f"Return code: {result.returncode}")
-        logger.info(f"Duration: {duration_minutes:.2f} minutes")
-
-        output_file = os.path.join(project_workdir, output_filename)
-
-        if os.path.exists(output_file):
-            with open(output_file, 'a') as f:
-                f.write(f"\n\nExecution time: {duration_minutes:.2f} minutes")
-
-        if os.path.exists(output_file):
-            with open(output_file, 'r') as f:
-                output_content = f.read()
-
-            if output_content:
-                if len(output_content) > 4000:
-                    await update.message.reply_text(output_content[:4000] + "\n\n[Output truncated...]")
-                else:
-                    await update.message.reply_text(output_content)
-            else:
-                await update.message.reply_text("Command completed but output.txt is empty")
-
-            os.remove(output_file)
-            logger.info(f"Cleaned up {output_filename}")
-        else:
-            response = result.stdout if result.stdout else result.stderr
-            if response:
-                await update.message.reply_text(f"Command output:\n{response[:4000]}")
-            else:
-                await update.message.reply_text("Command completed")
+        result, duration_minutes = await run_claude_command(cmd, project_workdir, request_uuid)
+        await process_output_file(update, output_file, duration_minutes)
 
     except subprocess.TimeoutExpired:
         await update.message.reply_text("Command timed out after 30 minutes")
-        if 'output_file' in locals() and os.path.exists(output_file):
-            os.remove(output_file)
-            logger.info(f"Cleaned up {output_filename} after timeout")
+        cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running command: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
-        if 'output_file' in locals() and os.path.exists(output_file):
-            os.remove(output_file)
-            logger.info(f"Cleaned up {output_filename} after error")
+        cleanup_output_file(output_file)
 
 async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /fix command."""
+    """Handle /fix command. Format: /fix project-name prompt"""
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /fix command")
         authorized_list = ", ".join(AUTHORIZED_USERS)
@@ -357,7 +321,58 @@ async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     logger.info("Received /fix command")
-    await update.message.reply_text("fix")
+
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text("Usage: /fix project-name prompt")
+        return
+
+    project_name = context.args[0]
+    user_prompt = " ".join(context.args[1:])
+
+    project = None
+    for p in PROJECTS:
+        if p['project_name'] == project_name:
+            project = p
+            break
+
+    if not project:
+        available_projects = ", ".join([p['project_name'] for p in PROJECTS])
+        await update.message.reply_text(f"Project '{project_name}' not found. Available projects: {available_projects}")
+        return
+
+    project_repo = project['project_repo']
+    project_workdir = project['project_workdir']
+
+    if not await clone_repository_if_needed(update, project_repo, project_workdir):
+        return
+
+    await update.message.reply_text(f"Processing for project: {project_name}...")
+
+    request_uuid = str(uuid.uuid4())
+    output_file = f"/tmp/output_{request_uuid}.txt"
+
+    try:
+        prompt = f"""Project: {project_name}
+Repository: {project_repo}
+Working Directory: {project_workdir}
+
+Task: {user_prompt}
+
+Write the output in {output_file}"""
+
+        cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", FIX_RULES, prompt]
+        logger.info(f"Running command for project {project_name} with UUID {request_uuid}")
+
+        result, duration_minutes = await run_claude_command(cmd, project_workdir, request_uuid)
+        await process_output_file(update, output_file, duration_minutes)
+
+    except subprocess.TimeoutExpired:
+        await update.message.reply_text("Command timed out after 30 minutes")
+        cleanup_output_file(output_file)
+    except Exception as e:
+        logger.error(f"Error running command: {e}")
+        await update.message.reply_text(f"Error: {str(e)}")
+        cleanup_output_file(output_file)
 
 async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /feedback command. Format: /feedback project-name prompt"""
@@ -390,112 +405,36 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
-    if not os.path.exists(project_workdir):
-        await update.message.reply_text(f"Project directory not found. Cloning {project_repo}...")
-        logger.info(f"Cloning {project_repo} into {project_workdir}")
-
-        try:
-            parent_dir = os.path.dirname(project_workdir)
-            if parent_dir and not os.path.exists(parent_dir):
-                os.makedirs(parent_dir, exist_ok=True)
-
-            clone_result = subprocess.run(
-                ["git", "clone", project_repo, project_workdir],
-                capture_output=True,
-                text=True,
-                timeout=1800
-            )
-
-            if clone_result.returncode != 0:
-                await update.message.reply_text(f"Failed to clone repository:\n{clone_result.stderr[:500]}")
-                return
-
-            await update.message.reply_text(f"Repository cloned successfully!")
-            logger.info(f"Successfully cloned {project_repo}")
-
-        except subprocess.TimeoutExpired:
-            await update.message.reply_text("Git clone timed out after 30 minutes")
-            return
-        except Exception as e:
-            logger.error(f"Error cloning repository: {e}")
-            await update.message.reply_text(f"Error cloning repository: {str(e)}")
-            return
+    if not await clone_repository_if_needed(update, project_repo, project_workdir):
+        return
 
     await update.message.reply_text(f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
-    start_time = datetime.now()
+    output_file = f"/tmp/output_{request_uuid}.txt"
 
     try:
-        output_filename = f"output_{request_uuid}.txt"
         prompt = f"""Project: {project_name}
 Repository: {project_repo}
 Working Directory: {project_workdir}
 
 Task: {user_prompt}
 
-Write the output in {output_filename}"""
+Write the output in {output_file}"""
 
         cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", FEEDBACK_RULES, prompt]
+        logger.info(f"Running command for project {project_name} with UUID {request_uuid}")
 
-        logger.info(f"Running command for project {project_name} with UUID {request_uuid}: {' '.join(cmd)}")
-
-        bot_dir = os.path.dirname(os.path.abspath(__file__))
-
-        result = subprocess.run(
-            cmd,
-            cwd=project_workdir,
-            capture_output=True,
-            text=True,
-            timeout=1800
-        )
-
-        end_time = datetime.now()
-        duration_minutes = (end_time - start_time).total_seconds() / 60
-
-        logger.info(f"Command stdout: {result.stdout}")
-        logger.info(f"Command stderr: {result.stderr}")
-        logger.info(f"Return code: {result.returncode}")
-        logger.info(f"Duration: {duration_minutes:.2f} minutes")
-
-        output_file = os.path.join(project_workdir, output_filename)
-
-        if os.path.exists(output_file):
-            with open(output_file, 'a') as f:
-                f.write(f"\n\nExecution time: {duration_minutes:.2f} minutes")
-
-        if os.path.exists(output_file):
-            with open(output_file, 'r') as f:
-                output_content = f.read()
-
-            if output_content:
-                if len(output_content) > 4000:
-                    await update.message.reply_text(output_content[:4000] + "\n\n[Output truncated...]")
-                else:
-                    await update.message.reply_text(output_content)
-            else:
-                await update.message.reply_text("Command completed but output.txt is empty")
-
-            os.remove(output_file)
-            logger.info(f"Cleaned up {output_filename}")
-        else:
-            response = result.stdout if result.stdout else result.stderr
-            if response:
-                await update.message.reply_text(f"Command output:\n{response[:4000]}")
-            else:
-                await update.message.reply_text("Command completed")
+        result, duration_minutes = await run_claude_command(cmd, project_workdir, request_uuid)
+        await process_output_file(update, output_file, duration_minutes)
 
     except subprocess.TimeoutExpired:
         await update.message.reply_text("Command timed out after 30 minutes")
-        if 'output_file' in locals() and os.path.exists(output_file):
-            os.remove(output_file)
-            logger.info(f"Cleaned up {output_filename} after timeout")
+        cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running command: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
-        if 'output_file' in locals() and os.path.exists(output_file):
-            os.remove(output_file)
-            logger.info(f"Cleaned up {output_filename} after error")
+        cleanup_output_file(output_file)
 
 def main():
     parser = argparse.ArgumentParser(description='Telegram bot that replies when mentioned')
