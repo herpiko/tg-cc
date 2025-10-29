@@ -69,6 +69,7 @@ projects:
    - `/feat`: Implement features in a project
    - `/fix`: Fix bugs in a project
    - `/feedback`: Continue work on existing branch
+   - `/init`: Initialize CLAUDE.md for a project
 
 ### Command Flow (feat/fix/feedback)
 
@@ -130,6 +131,14 @@ projects:
 - Continues work on existing branch (does NOT switch branches)
 - For iterative development
 - Uses `feedback_rules` system prompt
+
+### /init
+**Format**: `/init project-name`
+- Manually initializes CLAUDE.md for a project
+- Clones repository if needed
+- Runs `initialize_claude_md_if_needed()` to generate CLAUDE.md
+- Commits and pushes CLAUDE.md to main branch
+- No other work is performed (useful for setting up new projects)
 
 ## Key Behaviors
 
