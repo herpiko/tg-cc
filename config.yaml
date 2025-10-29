@@ -1,8 +1,8 @@
 authorized_users:
-  - "herpiko"
+  - "foobar"
 
 authorized_groups:
-  - "-4876477133"
+  - "-9999999"
 
 general_rules: |
   - Avoid using too much emojis.
@@ -32,8 +32,8 @@ feat_rules: |
   - The output of the task, other than code changes, are:
     - Commit the changes
     - Push the branch
-    - Create merge request.
-  - When you asked to write a short summary, put the merge request link (if any).
+    - Create merge request. Target branch should be `main` except if stated otherwise.
+  - Write very short summary of your work into the output.txt, alongside with the merge request link (if any).
 
 fix_rules: |
   - If in the working directory there is no clode, clone the repository into that directory. Please utilize git.
@@ -56,8 +56,8 @@ fix_rules: |
   - The output of the task, other than code changes, are:
     - Commit the changes
     - Push the branch
-    - Create merge request.
-  - When you asked to write a short summary, put the merge request link (if any).
+    - Create merge request. Target branch should be `main` except if stated otherwise.
+  - Write very short summary of your work into the output.txt, alongside with the merge request link (if any).
 
 feedback_rules: |
   - We well continue the existing work branch. Do not clone the repository or clean the branch or switch branch.
@@ -71,10 +71,10 @@ feedback_rules: |
   - The output of the task, other than code changes, are:
     - Commit the changes
     - Push the branch
-    - Create merge request.
-  - When you asked to write a short summary, put the merge request link (if any).
+    - Create merge request. Target branch should be `main` except if stated otherwise.
+  - Write very short summary of your work into the output.txt, alongside with the merge request link (if any).
 
 projects:
-  - project_name: "chola-backend"
-    project_repo: "git@gitlab.com:chola-rent/chola-backend.git"
-    project_workdir: "/home/herpiko/src/chola-backend"
+  - project_name: "foobar"
+    project_repo: "git@gitlab.com:foobar/foobar.git"
+    project_workdir: "/home/herpiko/src/foobar"
