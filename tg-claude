@@ -1,0 +1,490 @@
+#!/usr/bin/env python3
+import argparse
+import logging
+import subprocess
+import os
+import yaml
+from datetime import datetime
+from telegram import Update
+from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+AUTHORIZED_USERS = []
+AUTHORIZED_GROUPS = []
+PROJECTS = []
+ASK_RULES = ""
+FEAT_RULES = ""
+FIX_RULES = ""
+FEEDBACK_RULES = ""
+
+def load_config():
+    """Load configuration from projects.yaml"""
+    global PROJECTS, AUTHORIZED_USERS, AUTHORIZED_GROUPS, ASK_RULES, FEAT_RULES, FIX_RULES, FEEDBACK_RULES
+    try:
+        config_file = os.path.join(os.path.dirname(__file__), "projects.yaml")
+        with open(config_file, 'r') as f:
+            data = yaml.safe_load(f)
+
+            PROJECTS = data.get('projects', [])
+            AUTHORIZED_USERS = data.get('authorized_users', [])
+            AUTHORIZED_GROUPS = data.get('authorized_groups', [])
+            ASK_RULES = data.get('ask_rules', '')
+            FEAT_RULES = data.get('feat_rules', '')
+            FIX_RULES = data.get('fix_rules', '')
+            FEEDBACK_RULES = data.get('feedback_rules', '')
+
+            logger.info(f"Loaded {len(PROJECTS)} projects from projects.yaml")
+            for project in PROJECTS:
+                logger.info(f"  - {project['project_name']}: {project['project_workdir']}")
+
+            logger.info(f"Loaded {len(AUTHORIZED_USERS)} authorized users")
+            for user in AUTHORIZED_USERS:
+                logger.info(f"  - {user}")
+
+            logger.info(f"Loaded {len(AUTHORIZED_GROUPS)} authorized groups")
+            for group in AUTHORIZED_GROUPS:
+                logger.info(f"  - {group}")
+
+    except Exception as e:
+        logger.error(f"Error loading projects.yaml: {e}")
+        PROJECTS = []
+        AUTHORIZED_USERS = []
+        AUTHORIZED_GROUPS = []
+
+def is_authorized(update: Update) -> bool:
+    """Check if the user and chat are authorized to use the bot."""
+    if not update.message or not update.message.from_user:
+        return False
+
+    username = update.message.from_user.username
+    chat_id = str(update.message.chat.id)
+
+    logger.info(f"Checking authorization for user: {username}, chat_id: {chat_id}")
+
+    user_authorized = username in AUTHORIZED_USERS
+    group_authorized = chat_id in AUTHORIZED_GROUPS
+
+    return user_authorized and group_authorized
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle all messages and reply if bot is mentioned."""
+    if not is_authorized(update):
+        logger.info("Unauthorized user attempted to use bot")
+        authorized_list = ", ".join(AUTHORIZED_USERS)
+        await update.message.reply_text(f"I only respond to {authorized_list}")
+        return
+
+    message = update.message
+    if not message or not message.text:
+        logger.info("Received update with no text")
+        return
+
+    bot_username = f"@{context.bot.username}"
+
+    logger.info(f"Chat type: {message.chat.type}")
+    logger.info(f"Message from: {message.from_user.username}")
+    logger.info(f"Message text: {message.text}")
+    logger.info(f"Bot username: {bot_username}")
+
+    is_mentioned = False
+
+    if message.entities:
+        for entity in message.entities:
+            if entity.type == "mention":
+                mentioned_text = message.text[entity.offset:entity.offset + entity.length]
+                logger.info(f"Found mention: {mentioned_text}")
+                if mentioned_text == bot_username:
+                    is_mentioned = True
+                    break
+            elif entity.type == "text_mention":
+                if entity.user and entity.user.id == context.bot.id:
+                    is_mentioned = True
+                    break
+
+    if not is_mentioned and bot_username.lower() in message.text.lower():
+        is_mentioned = True
+        logger.info("Found bot username in text (case insensitive)")
+
+    if is_mentioned:
+        text_without_mention = message.text.replace(bot_username, "").strip()
+        logger.info(f"Bot was mentioned! Replying...")
+
+        if text_without_mention:
+            await message.reply_text(text_without_mention)
+        else:
+            await message.reply_text("Hello")
+
+        logger.info(f"Reply sent!")
+    else:
+        logger.info("Bot was not mentioned in this message")
+
+async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /ask command."""
+    if not is_authorized(update):
+        logger.info("Unauthorized user attempted to use /ask command")
+        authorized_list = ", ".join(AUTHORIZED_USERS)
+        await update.message.reply_text(f"I only respond to {authorized_list}")
+        return
+
+    logger.info("Received /ask command")
+
+    user_text = " ".join(context.args) if context.args else ""
+
+    if not user_text:
+        await update.message.reply_text("Please provide a query after /ask")
+        return
+
+    await update.message.reply_text(f"Processing...")
+
+    start_time = datetime.now()
+
+    try:
+        prompt = f"{user_text}\n\nWrite the output in output.txt"
+
+        cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", ASK_RULES, prompt]
+
+        logger.info(f"Running command: {' '.join(cmd)}")
+
+        bot_dir = os.path.dirname(os.path.abspath(__file__))
+
+        result = subprocess.run(
+            cmd,
+            cwd=bot_dir,
+            capture_output=True,
+            text=True,
+            timeout=1800
+        )
+
+        end_time = datetime.now()
+        duration_minutes = (end_time - start_time).total_seconds() / 60
+
+        logger.info(f"Command stdout: {result.stdout}")
+        logger.info(f"Command stderr: {result.stderr}")
+        logger.info(f"Return code: {result.returncode}")
+        logger.info(f"Duration: {duration_minutes:.2f} minutes")
+
+        output_file = os.path.join(bot_dir, "output.txt")
+
+        if os.path.exists(output_file):
+            with open(output_file, 'a') as f:
+                f.write(f"\n\nExecution time: {duration_minutes:.2f} minutes")
+
+        if os.path.exists(output_file):
+            with open(output_file, 'r') as f:
+                output_content = f.read()
+
+            if output_content:
+                if len(output_content) > 4000:
+                    await update.message.reply_text(output_content[:4000] + "\n\n[Output truncated...]")
+                else:
+                    await update.message.reply_text(output_content)
+            else:
+                await update.message.reply_text("Command completed but output.txt is empty")
+        else:
+            response = result.stdout if result.stdout else result.stderr
+            if response:
+                await update.message.reply_text(f"Command output:\n{response[:4000]}")
+            else:
+                await update.message.reply_text("Command completed")
+
+    except subprocess.TimeoutExpired:
+        await update.message.reply_text("Command timed out after 30 minutes")
+    except Exception as e:
+        logger.error(f"Error running command: {e}")
+        await update.message.reply_text(f"Error: {str(e)}")
+
+async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /feat command. Format: /feat project-name prompt"""
+    if not is_authorized(update):
+        logger.info("Unauthorized user attempted to use /feat command")
+        authorized_list = ", ".join(AUTHORIZED_USERS)
+        await update.message.reply_text(f"I only respond to {authorized_list}")
+        return
+
+    logger.info("Received /feat command")
+
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text("Usage: /feat project-name prompt")
+        return
+
+    project_name = context.args[0]
+    user_prompt = " ".join(context.args[1:])
+
+    project = None
+    for p in PROJECTS:
+        if p['project_name'] == project_name:
+            project = p
+            break
+
+    if not project:
+        available_projects = ", ".join([p['project_name'] for p in PROJECTS])
+        await update.message.reply_text(f"Project '{project_name}' not found. Available projects: {available_projects}")
+        return
+
+    project_repo = project['project_repo']
+    project_workdir = project['project_workdir']
+
+    if not os.path.exists(project_workdir):
+        await update.message.reply_text(f"Project directory not found. Cloning {project_repo}...")
+        logger.info(f"Cloning {project_repo} into {project_workdir}")
+
+        try:
+            parent_dir = os.path.dirname(project_workdir)
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, exist_ok=True)
+
+            clone_result = subprocess.run(
+                ["git", "clone", project_repo, project_workdir],
+                capture_output=True,
+                text=True,
+                timeout=1800
+            )
+
+            if clone_result.returncode != 0:
+                await update.message.reply_text(f"Failed to clone repository:\n{clone_result.stderr[:500]}")
+                return
+
+            await update.message.reply_text(f"Repository cloned successfully!")
+            logger.info(f"Successfully cloned {project_repo}")
+
+        except subprocess.TimeoutExpired:
+            await update.message.reply_text("Git clone timed out after 30 minutes")
+            return
+        except Exception as e:
+            logger.error(f"Error cloning repository: {e}")
+            await update.message.reply_text(f"Error cloning repository: {str(e)}")
+            return
+
+    await update.message.reply_text(f"Processing for project: {project_name}...")
+
+    start_time = datetime.now()
+
+    try:
+        prompt = f"""Project: {project_name}
+Repository: {project_repo}
+Working Directory: {project_workdir}
+
+Task: {user_prompt}
+
+Write the output in output.txt"""
+
+        cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", FEAT_RULES, prompt]
+
+        logger.info(f"Running command for project {project_name}: {' '.join(cmd)}")
+
+        bot_dir = os.path.dirname(os.path.abspath(__file__))
+
+        result = subprocess.run(
+            cmd,
+            cwd=project_workdir,
+            capture_output=True,
+            text=True,
+            timeout=1800
+        )
+
+        end_time = datetime.now()
+        duration_minutes = (end_time - start_time).total_seconds() / 60
+
+        logger.info(f"Command stdout: {result.stdout}")
+        logger.info(f"Command stderr: {result.stderr}")
+        logger.info(f"Return code: {result.returncode}")
+        logger.info(f"Duration: {duration_minutes:.2f} minutes")
+
+        output_file = os.path.join(project_workdir, "output.txt")
+
+        if os.path.exists(output_file):
+            with open(output_file, 'a') as f:
+                f.write(f"\n\nExecution time: {duration_minutes:.2f} minutes")
+
+        if os.path.exists(output_file):
+            with open(output_file, 'r') as f:
+                output_content = f.read()
+
+            if output_content:
+                if len(output_content) > 4000:
+                    await update.message.reply_text(output_content[:4000] + "\n\n[Output truncated...]")
+                else:
+                    await update.message.reply_text(output_content)
+            else:
+                await update.message.reply_text("Command completed but output.txt is empty")
+        else:
+            response = result.stdout if result.stdout else result.stderr
+            if response:
+                await update.message.reply_text(f"Command output:\n{response[:4000]}")
+            else:
+                await update.message.reply_text("Command completed")
+
+    except subprocess.TimeoutExpired:
+        await update.message.reply_text("Command timed out after 30 minutes")
+    except Exception as e:
+        logger.error(f"Error running command: {e}")
+        await update.message.reply_text(f"Error: {str(e)}")
+
+async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /fix command."""
+    if not is_authorized(update):
+        logger.info("Unauthorized user attempted to use /fix command")
+        authorized_list = ", ".join(AUTHORIZED_USERS)
+        await update.message.reply_text(f"I only respond to {authorized_list}")
+        return
+
+    logger.info("Received /fix command")
+    await update.message.reply_text("fix")
+
+async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /feedback command. Format: /feedback project-name prompt"""
+    if not is_authorized(update):
+        logger.info("Unauthorized user attempted to use /feedback command")
+        authorized_list = ", ".join(AUTHORIZED_USERS)
+        await update.message.reply_text(f"I only respond to {authorized_list}")
+        return
+
+    logger.info("Received /feedback command")
+
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text("Usage: /feedback project-name prompt")
+        return
+
+    project_name = context.args[0]
+    user_prompt = " ".join(context.args[1:])
+
+    project = None
+    for p in PROJECTS:
+        if p['project_name'] == project_name:
+            project = p
+            break
+
+    if not project:
+        available_projects = ", ".join([p['project_name'] for p in PROJECTS])
+        await update.message.reply_text(f"Project '{project_name}' not found. Available projects: {available_projects}")
+        return
+
+    project_repo = project['project_repo']
+    project_workdir = project['project_workdir']
+
+    if not os.path.exists(project_workdir):
+        await update.message.reply_text(f"Project directory not found. Cloning {project_repo}...")
+        logger.info(f"Cloning {project_repo} into {project_workdir}")
+
+        try:
+            parent_dir = os.path.dirname(project_workdir)
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, exist_ok=True)
+
+            clone_result = subprocess.run(
+                ["git", "clone", project_repo, project_workdir],
+                capture_output=True,
+                text=True,
+                timeout=1800
+            )
+
+            if clone_result.returncode != 0:
+                await update.message.reply_text(f"Failed to clone repository:\n{clone_result.stderr[:500]}")
+                return
+
+            await update.message.reply_text(f"Repository cloned successfully!")
+            logger.info(f"Successfully cloned {project_repo}")
+
+        except subprocess.TimeoutExpired:
+            await update.message.reply_text("Git clone timed out after 30 minutes")
+            return
+        except Exception as e:
+            logger.error(f"Error cloning repository: {e}")
+            await update.message.reply_text(f"Error cloning repository: {str(e)}")
+            return
+
+    await update.message.reply_text(f"Processing for project: {project_name}...")
+
+    start_time = datetime.now()
+
+    try:
+        prompt = f"""Project: {project_name}
+Repository: {project_repo}
+Working Directory: {project_workdir}
+
+Task: {user_prompt}
+
+Write the output in output.txt"""
+
+        cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", FEEDBACK_RULES, prompt]
+
+        logger.info(f"Running command for project {project_name}: {' '.join(cmd)}")
+
+        bot_dir = os.path.dirname(os.path.abspath(__file__))
+
+        result = subprocess.run(
+            cmd,
+            cwd=project_workdir,
+            capture_output=True,
+            text=True,
+            timeout=1800
+        )
+
+        end_time = datetime.now()
+        duration_minutes = (end_time - start_time).total_seconds() / 60
+
+        logger.info(f"Command stdout: {result.stdout}")
+        logger.info(f"Command stderr: {result.stderr}")
+        logger.info(f"Return code: {result.returncode}")
+        logger.info(f"Duration: {duration_minutes:.2f} minutes")
+
+        output_file = os.path.join(project_workdir, "output.txt")
+
+        if os.path.exists(output_file):
+            with open(output_file, 'a') as f:
+                f.write(f"\n\nExecution time: {duration_minutes:.2f} minutes")
+
+        if os.path.exists(output_file):
+            with open(output_file, 'r') as f:
+                output_content = f.read()
+
+            if output_content:
+                if len(output_content) > 4000:
+                    await update.message.reply_text(output_content[:4000] + "\n\n[Output truncated...]")
+                else:
+                    await update.message.reply_text(output_content)
+            else:
+                await update.message.reply_text("Command completed but output.txt is empty")
+        else:
+            response = result.stdout if result.stdout else result.stderr
+            if response:
+                await update.message.reply_text(f"Command output:\n{response[:4000]}")
+            else:
+                await update.message.reply_text("Command completed")
+
+    except subprocess.TimeoutExpired:
+        await update.message.reply_text("Command timed out after 30 minutes")
+    except Exception as e:
+        logger.error(f"Error running command: {e}")
+        await update.message.reply_text(f"Error: {str(e)}")
+
+def main():
+    parser = argparse.ArgumentParser(description='Telegram bot that replies when mentioned')
+    parser.add_argument('--api-token', required=True, help='Telegram Bot API token')
+    args = parser.parse_args()
+
+    load_config()
+
+    application = Application.builder().token(args.api_token).build()
+
+    application.add_handler(CommandHandler("ask", cmd_ask))
+    application.add_handler(CommandHandler("feat", cmd_feat))
+    application.add_handler(CommandHandler("fix", cmd_fix))
+    application.add_handler(CommandHandler("feedback", cmd_feedback))
+
+    application.add_handler(MessageHandler(
+        filters.ALL,
+        handle_message
+    ))
+
+    logger.info("Bot is starting...")
+    logger.info("Listening for messages and commands...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+if __name__ == '__main__':
+    main()
