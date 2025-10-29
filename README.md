@@ -1,6 +1,6 @@
-# tg-claude
+# tg-ccc
 
-A Telegram bot that integrates Claude AI to help with development tasks through chat commands. This bot can execute Claude Code with dangerous mode enabled to perform complex development tasks like implementing features, fixing bugs, and more.
+A Telegram bot that integrates Claude AI to help with software development tasks through chat commands. This bot can execute Claude Code with dangerous mode enabled to perform complex development tasks like implementing features, fixing bugs, and more. Image having a software development team but they are not human. Give them instructions then review their work before merge their changes.
 
 This project was fully written by Claude Code with `--dangerously-skip-permissions` mode enabled. The project runs with the same mode.
 
