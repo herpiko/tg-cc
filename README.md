@@ -13,16 +13,16 @@ This project was fully written by Claude Code with `--dangerously-skip-permissio
   - A Docker container
   - A separate development machine
   - A sandboxed environment
-1. **DO NOT run this on:**
+2. **DO NOT run this on:**
   - Your primary development machine
   - Production servers
   - Machines with sensitive data
   - Shared systems
-1. **API Token**: Keep your Telegram bot token secret
-1. **Authorization**: Regularly review authorized users and groups
-1. **Repository Access**: Bot has full access to configured repositories
-1. **File System**: Bot can modify files in project directories
-1. **Command Execution**: Bot executes arbitrary commands via Claude
+3. **API Token**: Keep your Telegram bot token secret
+4. **Authorization**: Regularly review authorized users and groups
+5. **Repository Access**: Bot has full access to configured repositories
+6. **File System**: Bot can modify files in project directories
+7. **Command Execution**: Bot executes arbitrary commands via Claude
 
 The bot executes Claude commands with dangerous mode, which allows it to make arbitrary file system changes, run commands, and potentially perform destructive operations.
 
