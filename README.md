@@ -1,22 +1,28 @@
-# tg-ccc
+# tg-cc
 
 A Telegram bot that integrates Claude AI to help with software development tasks through chat commands. This bot can execute Claude Code with dangerous mode enabled to perform complex development tasks like implementing features, fixing bugs, and more. Imagine you are having a software development team but they are not human. Give them instructions then review their work before merge their changes.
 
-This project was fully written by Claude Code with `--dangerously-skip-permissions` mode enabled. The project runs with the same mode.
+This project was fully written by Claude Code with `--dangerously-skip-permissions` mode enabled. **This bot runs Claude Code with the same mode.**
 
 ## Important Security Notice
 
 **ALWAYS run this bot in an isolated environment such as:**
-- A dedicated VM
-- A Docker container
-- A separate development machine
-- A sandboxed environment
 
-**DO NOT run this on:**
-- Your primary development machine
-- Production servers
-- Machines with sensitive data
-- Shared systems
+1. **Isolated Environment**: Always run in isolation
+  - A dedicated VM
+  - A Docker container
+  - A separate development machine
+  - A sandboxed environment
+1. **DO NOT run this on:**
+  - Your primary development machine
+  - Production servers
+  - Machines with sensitive data
+  - Shared systems
+1. **API Token**: Keep your Telegram bot token secret
+1. **Authorization**: Regularly review authorized users and groups
+1. **Repository Access**: Bot has full access to configured repositories
+1. **File System**: Bot can modify files in project directories
+1. **Command Execution**: Bot executes arbitrary commands via Claude
 
 The bot executes Claude commands with dangerous mode, which allows it to make arbitrary file system changes, run commands, and potentially perform destructive operations.
 
@@ -39,6 +45,7 @@ This project is subject to changes as it is still in **active and heavy developm
 - Claude Code CLI installed and configured
 - Telegram Bot API token (from @BotFather)
 - Git (for repository cloning)
+- The environment has to be configured to have network access and credentials ready (Claude Code, SSH for git, authentication for glab (gitlab), etc).
 
 ## Installation
 
@@ -149,12 +156,6 @@ Fix bugs in a specific project (currently placeholder).
 6. Bot sends results back to the chat
 7. Output is saved to `output.txt` with execution time appended
 
-## Timeout Configuration
-
-All operations have a **30-minute timeout**:
-- Claude command execution: 30 minutes
-- Git clone operations: 30 minutes
-
 ## Authorization
 
 The bot enforces **dual authorization**:
@@ -162,33 +163,6 @@ The bot enforces **dual authorization**:
 - Chat must be in `authorized_groups` list
 
 Both conditions must be met for the bot to respond.
-
-## Project Structure
-
-```
-tg-claude/
-├── tg-claude           # Main bot script (executable)
-├── projects.yaml       # Configuration file
-├── requirements.txt    # Python dependencies
-├── README.md          # This file
-└── output.txt         # Generated output (per execution)
-```
-
-## Dependencies
-
-- `python-telegram-bot==20.7` - Telegram Bot API wrapper
-- `PyYAML==6.0.1` - YAML configuration parser
-
-## Getting Your Telegram Bot Token
-
-1. Open Telegram and search for @BotFather
-2. Send `/newbot` and follow the instructions
-3. Copy the API token provided
-4. To get group chat ID:
-   - Add the bot to your group
-   - Send a message in the group
-   - Visit: `https://api.telegram.org/bot<YourBOTToken>/getUpdates`
-   - Find the chat ID in the response (negative number for groups)
 
 ## Disable Privacy Mode
 
@@ -201,17 +175,6 @@ For the bot to work in groups, you must disable Privacy Mode:
 5. Click **Turn off**
 6. Remove and re-add the bot to your group
 
-## Logging
-
-The bot logs all operations including:
-- User authorization attempts
-- Command executions
-- Git operations
-- Execution durations
-- Errors and timeouts
-
-Logs are output to stdout with timestamps.
-
 ## Troubleshooting
 
 ### Bot doesn't respond in group
@@ -219,6 +182,11 @@ Logs are output to stdout with timestamps.
 - Verify the group chat ID is in `authorized_groups`
 - Verify your username is in `authorized_users`
 - Check bot logs for authorization messages
+
+### Unauthorized user message
+- Check your Telegram username matches exactly (case-sensitive)
+- Ensure you're in the correct group
+- Verify `projects.yaml` is loaded correctly (check startup logs)
 
 ### Git clone fails
 - Verify SSH keys are configured if using SSH URLs
@@ -229,20 +197,6 @@ Logs are output to stdout with timestamps.
 - Increase timeout if needed (currently 30 minutes)
 - Check Claude Code is installed and accessible
 - Verify the task isn't too complex
-
-### Unauthorized user message
-- Check your Telegram username matches exactly (case-sensitive)
-- Ensure you're in the correct group
-- Verify `projects.yaml` is loaded correctly (check startup logs)
-
-## Security Considerations
-
-1. **Isolated Environment**: Always run in isolation
-2. **API Token**: Keep your Telegram bot token secret
-3. **Authorization**: Regularly review authorized users and groups
-4. **Repository Access**: Bot has full access to configured repositories
-5. **File System**: Bot can modify files in project directories
-6. **Command Execution**: Bot executes arbitrary commands via Claude
 
 ## Contributing
 
