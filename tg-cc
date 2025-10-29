@@ -4,6 +4,7 @@ import logging
 import subprocess
 import os
 import yaml
+import uuid
 from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
@@ -141,14 +142,16 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(f"Processing...")
 
+    request_uuid = str(uuid.uuid4())
     start_time = datetime.now()
 
     try:
-        prompt = f"{user_text}\n\nWrite the output in output.txt"
+        output_filename = f"output_{request_uuid}.txt"
+        prompt = f"{user_text}\n\nWrite the output in {output_filename}"
 
         cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", ASK_RULES, prompt]
 
-        logger.info(f"Running command: {' '.join(cmd)}")
+        logger.info(f"Running command with UUID {request_uuid}: {' '.join(cmd)}")
 
         bot_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -168,7 +171,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info(f"Return code: {result.returncode}")
         logger.info(f"Duration: {duration_minutes:.2f} minutes")
 
-        output_file = os.path.join(bot_dir, "output.txt")
+        output_file = os.path.join(bot_dir, output_filename)
 
         if os.path.exists(output_file):
             with open(output_file, 'a') as f:
@@ -185,6 +188,9 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     await update.message.reply_text(output_content)
             else:
                 await update.message.reply_text("Command completed but output.txt is empty")
+
+            os.remove(output_file)
+            logger.info(f"Cleaned up {output_filename}")
         else:
             response = result.stdout if result.stdout else result.stderr
             if response:
@@ -194,9 +200,15 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     except subprocess.TimeoutExpired:
         await update.message.reply_text("Command timed out after 30 minutes")
+        if 'output_file' in locals() and os.path.exists(output_file):
+            os.remove(output_file)
+            logger.info(f"Cleaned up {output_filename} after timeout")
     except Exception as e:
         logger.error(f"Error running command: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
+        if 'output_file' in locals() and os.path.exists(output_file):
+            os.remove(output_file)
+            logger.info(f"Cleaned up {output_filename} after error")
 
 async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /feat command. Format: /feat project-name prompt"""
@@ -262,20 +274,22 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(f"Processing for project: {project_name}...")
 
+    request_uuid = str(uuid.uuid4())
     start_time = datetime.now()
 
     try:
+        output_filename = f"output_{request_uuid}.txt"
         prompt = f"""Project: {project_name}
 Repository: {project_repo}
 Working Directory: {project_workdir}
 
 Task: {user_prompt}
 
-Write the output in output.txt"""
+Write the output in {output_filename}"""
 
         cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", FEAT_RULES, prompt]
 
-        logger.info(f"Running command for project {project_name}: {' '.join(cmd)}")
+        logger.info(f"Running command for project {project_name} with UUID {request_uuid}: {' '.join(cmd)}")
 
         bot_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -295,7 +309,7 @@ Write the output in output.txt"""
         logger.info(f"Return code: {result.returncode}")
         logger.info(f"Duration: {duration_minutes:.2f} minutes")
 
-        output_file = os.path.join(project_workdir, "output.txt")
+        output_file = os.path.join(project_workdir, output_filename)
 
         if os.path.exists(output_file):
             with open(output_file, 'a') as f:
@@ -312,6 +326,9 @@ Write the output in output.txt"""
                     await update.message.reply_text(output_content)
             else:
                 await update.message.reply_text("Command completed but output.txt is empty")
+
+            os.remove(output_file)
+            logger.info(f"Cleaned up {output_filename}")
         else:
             response = result.stdout if result.stdout else result.stderr
             if response:
@@ -321,9 +338,15 @@ Write the output in output.txt"""
 
     except subprocess.TimeoutExpired:
         await update.message.reply_text("Command timed out after 30 minutes")
+        if 'output_file' in locals() and os.path.exists(output_file):
+            os.remove(output_file)
+            logger.info(f"Cleaned up {output_filename} after timeout")
     except Exception as e:
         logger.error(f"Error running command: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
+        if 'output_file' in locals() and os.path.exists(output_file):
+            os.remove(output_file)
+            logger.info(f"Cleaned up {output_filename} after error")
 
 async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /fix command."""
@@ -400,20 +423,22 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_text(f"Processing for project: {project_name}...")
 
+    request_uuid = str(uuid.uuid4())
     start_time = datetime.now()
 
     try:
+        output_filename = f"output_{request_uuid}.txt"
         prompt = f"""Project: {project_name}
 Repository: {project_repo}
 Working Directory: {project_workdir}
 
 Task: {user_prompt}
 
-Write the output in output.txt"""
+Write the output in {output_filename}"""
 
         cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", FEEDBACK_RULES, prompt]
 
-        logger.info(f"Running command for project {project_name}: {' '.join(cmd)}")
+        logger.info(f"Running command for project {project_name} with UUID {request_uuid}: {' '.join(cmd)}")
 
         bot_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -433,7 +458,7 @@ Write the output in output.txt"""
         logger.info(f"Return code: {result.returncode}")
         logger.info(f"Duration: {duration_minutes:.2f} minutes")
 
-        output_file = os.path.join(project_workdir, "output.txt")
+        output_file = os.path.join(project_workdir, output_filename)
 
         if os.path.exists(output_file):
             with open(output_file, 'a') as f:
@@ -450,6 +475,9 @@ Write the output in output.txt"""
                     await update.message.reply_text(output_content)
             else:
                 await update.message.reply_text("Command completed but output.txt is empty")
+
+            os.remove(output_file)
+            logger.info(f"Cleaned up {output_filename}")
         else:
             response = result.stdout if result.stdout else result.stderr
             if response:
@@ -459,9 +487,15 @@ Write the output in output.txt"""
 
     except subprocess.TimeoutExpired:
         await update.message.reply_text("Command timed out after 30 minutes")
+        if 'output_file' in locals() and os.path.exists(output_file):
+            os.remove(output_file)
+            logger.info(f"Cleaned up {output_filename} after timeout")
     except Exception as e:
         logger.error(f"Error running command: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
+        if 'output_file' in locals() and os.path.exists(output_file):
+            os.remove(output_file)
+            logger.info(f"Cleaned up {output_filename} after error")
 
 def main():
     parser = argparse.ArgumentParser(description='Telegram bot that replies when mentioned')

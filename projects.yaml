@@ -6,11 +6,10 @@ authorized_groups:
 
 general_rules: |
   - Avoid using too much emojis.
-  - Be clear and concise in your responses.
-  - Do not reply with long message. Make it short, clear, and concise.
+  - Do not reply with too long message.
 
 ask_rules: |
-  - Do not reply with long message. Make it short, clear, and concise.
+  - Be clear and concise in your responses.
 
 feat_rules: |
   - If in the working directory there is no clode, clone the repository into that directory. Please utilize git.
