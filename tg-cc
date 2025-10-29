@@ -209,7 +209,6 @@ async def refresh_to_main_branch(update, project_workdir):
             await update.message.reply_text(f"Warning: Could not checkout main:\n{checkout_result.stderr[:500]}")
 
         # Pull latest from main
-        await update.message.reply_text("Pulling latest changes from main...")
         logger.info("Pulling from origin/main")
 
         pull_result = subprocess.run(
@@ -244,7 +243,6 @@ async def initialize_claude_md_if_needed(update, project_workdir):
 
     try:
         # Clean up the branch - reset any uncommitted changes
-        await update.message.reply_text("Cleaning up branch...")
         logger.info("Cleaning up branch")
 
         reset_result = subprocess.run(
@@ -272,7 +270,6 @@ async def initialize_claude_md_if_needed(update, project_workdir):
             logger.error(f"git clean failed: {clean_result.stderr}")
 
         # Checkout to main branch
-        await update.message.reply_text("Switching to main branch...")
         logger.info("Checking out main branch")
 
         checkout_result = subprocess.run(
@@ -288,7 +285,6 @@ async def initialize_claude_md_if_needed(update, project_workdir):
             await update.message.reply_text(f"Warning: Could not checkout main:\n{checkout_result.stderr[:500]}")
 
         # Pull latest from main
-        await update.message.reply_text("Pulling latest changes from main...")
         logger.info("Pulling from origin/main")
 
         pull_result = subprocess.run(
@@ -320,7 +316,7 @@ async def initialize_claude_md_if_needed(update, project_workdir):
             await update.message.reply_text(f"Failed to initialize CLAUDE.md:\n{init_result.stderr[:500]}")
             return False
 
-        await update.message.reply_text("CLAUDE.md initialized successfully! Committing and pushing to main...")
+        await update.message.reply_text("CLAUDE.md initialized successfully! Committing and pushing to main branch...")
         logger.info(f"Successfully initialized CLAUDE.md in {project_workdir}")
 
         # Commit and push CLAUDE.md to main
@@ -522,10 +518,10 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await initialize_claude_md_if_needed(update, project_workdir):
         return
 
+    await update.message.reply_text(f"Processing for project: {project_name}...")
+
     if not await refresh_to_main_branch(update, project_workdir):
         return
-
-    await update.message.reply_text(f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
     output_file = f"/tmp/output_{request_uuid}.txt"
@@ -590,10 +586,10 @@ async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await initialize_claude_md_if_needed(update, project_workdir):
         return
 
+    await update.message.reply_text(f"Processing for project: {project_name}...")
+
     if not await refresh_to_main_branch(update, project_workdir):
         return
-
-    await update.message.reply_text(f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
     output_file = f"/tmp/output_{request_uuid}.txt"
@@ -658,10 +654,10 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not await initialize_claude_md_if_needed(update, project_workdir):
         return
 
+    await update.message.reply_text(f"Processing for project: {project_name}...")
+
     if not await refresh_to_main_branch(update, project_workdir):
         return
-
-    await update.message.reply_text(f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
     output_file = f"/tmp/output_{request_uuid}.txt"
