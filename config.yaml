@@ -2,7 +2,7 @@ authorized_users:
   - "foobar"
 
 authorized_groups:
-  - "-9999999"
+  - "-999999"
 
 general_rules: |
   - Avoid using too much emojis.
