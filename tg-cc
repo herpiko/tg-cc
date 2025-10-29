@@ -24,10 +24,10 @@ FIX_RULES = ""
 FEEDBACK_RULES = ""
 
 def load_config():
-    """Load configuration from projects.yaml"""
+    """Load configuration from config.yaml"""
     global PROJECTS, AUTHORIZED_USERS, AUTHORIZED_GROUPS, ASK_RULES, FEAT_RULES, FIX_RULES, FEEDBACK_RULES
     try:
-        config_file = os.path.join(os.path.dirname(__file__), "projects.yaml")
+        config_file = os.path.join(os.path.dirname(__file__), "config.yaml")
         with open(config_file, 'r') as f:
             data = yaml.safe_load(f)
 
@@ -39,7 +39,7 @@ def load_config():
             FIX_RULES = data.get('fix_rules', '')
             FEEDBACK_RULES = data.get('feedback_rules', '')
 
-            logger.info(f"Loaded {len(PROJECTS)} projects from projects.yaml")
+            logger.info(f"Loaded {len(PROJECTS)} projects from config.yaml")
             for project in PROJECTS:
                 logger.info(f"  - {project['project_name']}: {project['project_workdir']}")
 
@@ -52,7 +52,7 @@ def load_config():
                 logger.info(f"  - {group}")
 
     except Exception as e:
-        logger.error(f"Error loading projects.yaml: {e}")
+        logger.error(f"Error loading config.yaml: {e}")
         PROJECTS = []
         AUTHORIZED_USERS = []
         AUTHORIZED_GROUPS = []
@@ -158,6 +158,43 @@ async def clone_repository_if_needed(update, project_repo, project_workdir):
             return False
 
     return True
+
+async def initialize_claude_md_if_needed(update, project_workdir):
+    """Check if CLAUDE.md exists, if not run claude /init to create it."""
+    claude_md_path = os.path.join(project_workdir, "CLAUDE.md")
+
+    if os.path.exists(claude_md_path):
+        logger.info(f"CLAUDE.md already exists in {project_workdir}")
+        return True
+
+    await update.message.reply_text("CLAUDE.md not found. Initializing codebase...")
+    logger.info(f"Running claude /init in {project_workdir}")
+
+    try:
+        init_result = subprocess.run(
+            ["claude", "/init"],
+            cwd=project_workdir,
+            capture_output=True,
+            text=True,
+            timeout=1800
+        )
+
+        if init_result.returncode != 0:
+            logger.error(f"claude /init failed: {init_result.stderr}")
+            await update.message.reply_text(f"Failed to initialize CLAUDE.md:\n{init_result.stderr[:500]}")
+            return False
+
+        await update.message.reply_text("CLAUDE.md initialized successfully!")
+        logger.info(f"Successfully initialized CLAUDE.md in {project_workdir}")
+        return True
+
+    except subprocess.TimeoutExpired:
+        await update.message.reply_text("Claude initialization timed out after 30 minutes")
+        return False
+    except Exception as e:
+        logger.error(f"Error initializing CLAUDE.md: {e}")
+        await update.message.reply_text(f"Error initializing CLAUDE.md: {str(e)}")
+        return False
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle all messages and reply if bot is mentioned."""
@@ -284,6 +321,9 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await clone_repository_if_needed(update, project_repo, project_workdir):
         return
 
+    if not await initialize_claude_md_if_needed(update, project_workdir):
+        return
+
     await update.message.reply_text(f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
@@ -346,6 +386,9 @@ async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await clone_repository_if_needed(update, project_repo, project_workdir):
         return
 
+    if not await initialize_claude_md_if_needed(update, project_workdir):
+        return
+
     await update.message.reply_text(f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
@@ -406,6 +449,9 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     project_workdir = project['project_workdir']
 
     if not await clone_repository_if_needed(update, project_repo, project_workdir):
+        return
+
+    if not await initialize_claude_md_if_needed(update, project_workdir):
         return
 
     await update.message.reply_text(f"Processing for project: {project_name}...")
