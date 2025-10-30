@@ -140,6 +140,13 @@ projects:
 - Commits and pushes CLAUDE.md to main branch
 - No other work is performed (useful for setting up new projects)
 
+### /cost
+**Format**: `/cost`
+- Displays Claude API usage costs via claude-monitor
+- Runs `claude-monitor --view realtime` for 3 seconds
+- Captures and returns the cost information
+- No project required (runs in bot's directory)
+
 ## Key Behaviors
 
 1. **Branch Management**: feat/fix commands always create new branches with appropriate prefixes. feedback continues existing branch.

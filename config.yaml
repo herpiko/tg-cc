@@ -1,8 +1,8 @@
 authorized_users:
-  - "foobar"
+  - "herpiko"
 
 authorized_groups:
-  - "-999999"
+  - "-9999999999"
 
 general_rules: |
   - Avoid using too much emojis.
@@ -75,6 +75,9 @@ feedback_rules: |
   - Write very short summary of your work into the output.txt, alongside with the merge request link (if any).
 
 projects:
-  - project_name: "foobar"
-    project_repo: "git@gitlab.com:foobar/foobar.git"
-    project_workdir: "/home/herpiko/src/foobar"
+  - project_name: "foobar-frontend"
+    project_repo: "git@gitlab.com:foobar/foobar-frontend.git"
+    project_workdir: "/home/user/src/foobar-frontend"
+  - project_name: "foobar-backend"
+    project_repo: "git@gitlab.com:foobar/foobar-backend.git"
+    project_workdir: "/home/user/src/foobar-backend"

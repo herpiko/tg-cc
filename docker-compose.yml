@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  tg-cc:
+    image: herpiko/tg-cc:latest
+    container_name: tg-cc-bot
+    restart: unless-stopped
+
+    # Build configuration (uncomment to build locally instead of using image)
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+
+    # Command line arguments
+    command: ["--api-token", "${TELEGRAM_BOT_TOKEN}"]
+
+    # Labels for organization
+    labels:
+      - "com.tg-cc.description=Telegram bot with Claude AI integration"
+      - "com.tg-cc.version=1.0"
+      - "com.tg-cc.maintainer=herpiko"
+
+    # Environment variables
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+
+    # Volume mounts
+    volumes:
+      # Configuration file
+      - ./config.yaml:/app/config.yaml:ro
+
+      # SSH keys for git operations (read-only)
+      - ${SSH_KEY_PATH:-~/.ssh}:/root/.ssh:ro
+
+      # Claude Code CLI configuration
+      - ${CLAUDE_CONFIG_PATH:-~/.config/claude}:/root/.config/claude:ro
+
+      # Git configuration (optional)
+      - ${GIT_CONFIG_PATH:-~/.gitconfig}:/root/.gitconfig:ro
+
+      # Workspace for cloning repositories (persistent)
+      - workspace:/workspace
+
+      # Temp directory for output files
+      - /tmp/tg-cc:/tmp
+
+    # Security options - Run in isolated environment
+    # WARNING: This bot has full filesystem access and runs dangerous commands
+    security_opt:
+      - no-new-privileges:true
+
+    # Resource limits (optional - adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  workspace:
+    driver: local

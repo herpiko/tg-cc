@@ -9,6 +9,11 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
+# Ensure ~/.local/bin is in PATH for commands like claude-monitor
+user_local_bin = os.path.expanduser("~/.local/bin")
+if user_local_bin not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = f"{user_local_bin}:{os.environ.get('PATH', '')}"
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -443,7 +448,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.info("Bot was not mentioned in this message")
 
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /ask command."""
+    """Handle /ask command. Format: /ask project-name query"""
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /ask command")
         authorized_list = ", ".join(AUTHORIZED_USERS)
@@ -452,25 +457,51 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     logger.info("Received /ask command")
 
-    user_text = " ".join(context.args) if context.args else ""
-
-    if not user_text:
-        await update.message.reply_text("Please provide a query after /ask")
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text("Usage: /ask project-name query")
         return
 
-    await update.message.reply_text(f"Processing...")
+    project_name = context.args[0]
+    user_text = " ".join(context.args[1:])
+
+    project = None
+    for p in PROJECTS:
+        if p['project_name'] == project_name:
+            project = p
+            break
+
+    if not project:
+        available_projects = ", ".join([p['project_name'] for p in PROJECTS])
+        await update.message.reply_text(f"Project '{project_name}' not found. Available projects: {available_projects}")
+        return
+
+    project_repo = project['project_repo']
+    project_workdir = project['project_workdir']
+
+    if not await clone_repository_if_needed(update, project_repo, project_workdir):
+        return
+
+    if not await initialize_claude_md_if_needed(update, project_workdir):
+        return
+
+    await update.message.reply_text(f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
     output_file = f"/tmp/output_{request_uuid}.txt"
 
     try:
-        prompt = f"{user_text}\n\nWrite the output in {output_file}"
+        prompt = f"""Project: {project_name}
+Repository: {project_repo}
+Working Directory: {project_workdir}
+
+Query: {user_text}
+
+Write the output in {output_file}"""
+
         cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", ASK_RULES, prompt]
+        logger.info(f"Running command for project {project_name} with UUID {request_uuid}")
 
-        logger.info(f"Running command with UUID {request_uuid}")
-        bot_dir = os.path.dirname(os.path.abspath(__file__))
-
-        result, duration_minutes = await run_claude_command(cmd, bot_dir, request_uuid)
+        result, duration_minutes = await run_claude_command(cmd, project_workdir, request_uuid)
         await process_output_file(update, output_file, duration_minutes)
 
     except subprocess.TimeoutExpired:
@@ -724,6 +755,78 @@ async def cmd_init(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(f"Successfully initialized CLAUDE.md for project: {project_name}")
 
+async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /cost command. Displays Claude usage costs via claude-monitor."""
+    if not is_authorized(update):
+        logger.info("Unauthorized user attempted to use /cost command")
+        authorized_list = ", ".join(AUTHORIZED_USERS)
+        await update.message.reply_text(f"I only respond to {authorized_list}")
+        return
+
+    logger.info("Received /cost command")
+
+    await update.message.reply_text("Fetching Claude usage costs...")
+
+    log_file = "claude-monitor.log"
+
+    try:
+        # Run the claude-monitor command
+        cmd = f"rm {log_file} || true && claude-monitor --view daily >{log_file} 2>&1 < /dev/null & sleep 3 && pkill -f \"claude-monitor --view\""
+
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        logger.info(f"claude-monitor command completed with return code: {result.returncode}")
+
+        prompt = f"""
+Please edit the {log_file}, just take the Summary, remove everything else. Also remove the ASCII lines and make it chat message friendly.
+"""
+
+        cmd = ["claude", "--dangerously-skip-permissions", "--verbose", "--system-prompt", ASK_RULES, prompt]
+        project_workdir = os.path.dirname(__file__)
+        request_uuid = str(uuid.uuid4())
+        result, duration_minutes = await run_claude_command(cmd, project_workdir, request_uuid)
+
+        # Read the log file instead of stdout
+        if os.path.exists(log_file):
+            with open(log_file, 'r') as f:
+                log_content = f.read()
+
+            if log_content:
+                if len(log_content) > 4000:
+                    await update.message.reply_text(log_content[:4000] + "\n\n[Output truncated...]")
+                else:
+                    await update.message.reply_text(log_content)
+            else:
+                await update.message.reply_text("No cost data available in log file.")
+        else:
+            await update.message.reply_text("claude-monitor.log file not found. Make sure claude-monitor is installed.")
+
+    except subprocess.TimeoutExpired:
+        await update.message.reply_text("Command timed out after 30 seconds")
+    except Exception as e:
+        logger.error(f"Error running claude-monitor command: {e}")
+        await update.message.reply_text(f"Error fetching cost data: {str(e)}")
+
+async def send_startup_messages(application: Application) -> None:
+    """Send startup notification to all authorized groups."""
+    logger.info("Sending startup notifications to authorized groups...")
+
+    for group_id in AUTHORIZED_GROUPS:
+        try:
+            await application.bot.send_message(
+                chat_id=group_id,
+                text="Bot is now online and ready to receive commands."
+            )
+            logger.info(f"Sent startup message to group {group_id}")
+        except Exception as e:
+            logger.error(f"Failed to send startup message to group {group_id}: {e}")
+
 def main():
     parser = argparse.ArgumentParser(description='Telegram bot that replies when mentioned')
     parser.add_argument('--api-token', required=True, help='Telegram Bot API token')
@@ -738,11 +841,18 @@ def main():
     application.add_handler(CommandHandler("fix", cmd_fix))
     application.add_handler(CommandHandler("feedback", cmd_feedback))
     application.add_handler(CommandHandler("init", cmd_init))
+    application.add_handler(CommandHandler("cost", cmd_cost))
 
     application.add_handler(MessageHandler(
         filters.ALL,
         handle_message
     ))
+
+    # Set up post-init hook to send startup messages
+    async def post_init(app: Application) -> None:
+        await send_startup_messages(app)
+
+    application.post_init = post_init
 
     logger.info("Bot is starting...")
     logger.info("Listening for messages and commands...")

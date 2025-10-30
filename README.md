@@ -32,12 +32,13 @@ This project is subject to changes as it is still in **active and heavy developm
 
 ## Features
 
-- **Multiple Commands**: `/ask`, `/feat`, `/feedback`, `/fix`
+- **Multiple Commands**: `/ask`, `/feat`, `/feedback`, `/fix`, `/init`, `/cost`
 - **Project Management**: Configure multiple projects via YAML
 - **Authorization**: User and group-based access control
 - **Execution Tracking**: Automatic timing and logging
 - **Git Integration**: Automatic repository cloning
 - **System Prompts**: Configurable rules per command type
+- **Cost Monitoring**: View Claude API usage costs
 
 ## Prerequisites
 
@@ -45,14 +46,83 @@ This project is subject to changes as it is still in **active and heavy developm
 - Claude Code CLI installed and configured
 - Telegram Bot API token (from @BotFather)
 - Git (for repository cloning)
+- claude-monitor (https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor)
 - The environment has to be configured to have network access and credentials ready (Claude Code, SSH for git, authentication for glab (gitlab), etc).
 
 ## Installation
 
+### Option 1: Docker (Recommended)
+
+Docker provides the isolated environment required for running this bot safely.
+
 1. **Clone the repository:**
    ```bash
    git clone <your-repo-url>
-   cd tg-claude
+   cd tg-cc
+   ```
+
+2. **Configure environment:**
+   ```bash
+   cp .env.example .env
+   ```
+   Edit `.env` and set your `TELEGRAM_BOT_TOKEN` and paths to SSH keys and Claude config.
+
+3. **Configure projects:**
+   Edit `config.yaml` to set up authorized users, groups, and projects.
+
+4. **Build and run:**
+
+   **Using Make (recommended):**
+   ```bash
+   make build
+   make run
+   make logs
+   ```
+
+   **Using Docker Compose:**
+   ```bash
+   docker-compose up -d
+   docker-compose logs -f
+   ```
+
+5. **Manage the bot:**
+   ```bash
+   make stop       # Stop the bot
+   make restart    # Restart the bot
+   make logs       # View logs
+   make status     # Check status
+   ```
+
+   Run `make help` to see all available commands.
+
+6. **Stop the bot:**
+   ```bash
+   make down
+   # or
+   docker-compose down
+   ```
+
+**Building and pushing to Docker Hub:**
+```bash
+# Build the image
+make build
+# or
+docker build -t herpiko/tg-cc:latest .
+
+# Push to Docker Hub
+make push
+# or
+docker push herpiko/tg-cc:latest
+```
+
+For detailed Docker setup instructions, troubleshooting, and advanced configuration, see [DOCKER.md](DOCKER.md).
+
+### Option 2: Manual Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone <your-repo-url>
+   cd tg-cc
    ```
 
 2. **Install dependencies:**
@@ -62,11 +132,11 @@ This project is subject to changes as it is still in **active and heavy developm
 
 3. **Make the script executable:**
    ```bash
-   chmod +x tg-claude
+   chmod +x tg-cc
    ```
 
-4. **Configure projects.yaml:**
-   Edit `projects.yaml` to set up:
+4. **Configure config.yaml:**
+   Edit `config.yaml` to set up:
    - Authorized users
    - Authorized groups
    - Projects
@@ -105,8 +175,14 @@ projects:
 
 ### Start the Bot
 
+**With Docker Compose (recommended):**
 ```bash
-./tg-claude --api-token YOUR_TELEGRAM_BOT_TOKEN
+docker-compose up -d
+```
+
+**Manual execution:**
+```bash
+./tg-cc --api-token YOUR_TELEGRAM_BOT_TOKEN
 ```
 
 ### Available Commands
@@ -141,6 +217,22 @@ Fix bugs in a specific project (currently placeholder).
 **Example:**
 ```
 /fix my-project Resolve the memory leak in the cache module
+```
+
+#### `/init <project-name>`
+Initialize CLAUDE.md for a project.
+
+**Example:**
+```
+/init my-project
+```
+
+#### `/cost`
+Display Claude API usage costs via claude-monitor.
+
+**Example:**
+```
+/cost
 ```
 
 ## How It Works
