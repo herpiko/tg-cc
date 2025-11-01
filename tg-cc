@@ -551,9 +551,6 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(f"Processing for project: {project_name}...")
 
-    if not await refresh_to_main_branch(update, project_workdir):
-        return
-
     request_uuid = str(uuid.uuid4())
     output_file = f"/tmp/output_{request_uuid}.txt"
 
