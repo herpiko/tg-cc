@@ -549,6 +549,9 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await initialize_claude_md_if_needed(update, project_workdir):
         return
 
+    if not await refresh_to_main_branch(update, project_workdir):
+        return
+
     await update.message.reply_text(f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
@@ -683,9 +686,6 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     await update.message.reply_text(f"Processing for project: {project_name}...")
-
-    if not await refresh_to_main_branch(update, project_workdir):
-        return
 
     request_uuid = str(uuid.uuid4())
     output_file = f"/tmp/output_{request_uuid}.txt"
