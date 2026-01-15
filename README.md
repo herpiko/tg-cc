@@ -32,7 +32,7 @@ This project is subject to changes as it is still in **active and heavy developm
 
 ## Features
 
-- **Multiple Commands**: `/ask`, `/feat`, `/fix`, `/plan`, `/feedback`, `/init`, `/up`, `/stop`, `/status`, `/cancel`, `/log`, `/cost`
+- **Multiple Commands**: `/ask`, `/feat`, `/fix`, `/plan`, `/feedback`, `/init`, `/up`, `/stop`, `/status`, `/cancel`, `/log`, `/cost`, `/selfupdate`
 - **Project Management**: Configure multiple projects via YAML
 - **Session Continuity**: `/feedback` continues context from previous `/feat` or `/fix`
 - **Process Management**: Spin up and stop project processes
