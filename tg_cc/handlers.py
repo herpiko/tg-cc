@@ -856,7 +856,17 @@ async def cmd_selfupdate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     config_path = os.path.join(bot_dir, "config.yaml")
     config_backup_path = os.path.join("/tmp", "tg_cc_config_backup.yaml")
 
-    await reply(update, "Starting self-update...")
+    # Get current commit
+    current_commit_result = subprocess.run(
+        ["git", "log", "-1", "--format=%h %s"],
+        cwd=bot_dir,
+        capture_output=True,
+        text=True,
+        timeout=10
+    )
+    current_commit = current_commit_result.stdout.strip() if current_commit_result.returncode == 0 else "unknown"
+
+    await reply(update, f"Starting self-update...\nCurrent: {current_commit}")
 
     try:
         # Backup config.yaml
@@ -910,8 +920,18 @@ async def cmd_selfupdate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await reply(update, f"Warning: pip install failed: {pip_result.stderr[:500]}")
             # Continue anyway, the code update might still work
 
-        await reply(update, "Update complete! Restarting bot...")
-        logger.info("Self-update complete, restarting...")
+        # Get new commit
+        new_commit_result = subprocess.run(
+            ["git", "log", "-1", "--format=%h %s"],
+            cwd=bot_dir,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        new_commit = new_commit_result.stdout.strip() if new_commit_result.returncode == 0 else "unknown"
+
+        await reply(update, f"Update complete! Restarting bot...\nUpdated to: {new_commit}")
+        logger.info(f"Self-update complete ({current_commit} -> {new_commit}), restarting...")
 
         # Give telegram time to send the message
         import asyncio
