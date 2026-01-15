@@ -1,2 +1,3 @@
 python-telegram-bot==20.7
 PyYAML==6.0.1
+claude-agent-sdk

@@ -1,4 +1,4 @@
-.PHONY: help build push run stop restart logs clean prune backup restore
+.PHONY: help build push run run-native run-docker stop restart logs clean prune backup restore
 
 # Docker image configuration
 IMAGE_NAME = herpiko/tg-cc
@@ -29,8 +29,14 @@ pull: ## Pull the Docker image from Docker Hub
 	@echo "Pulling Docker image: $(FULL_IMAGE)"
 	docker pull $(FULL_IMAGE)
 
-run: ## Start the bot using Docker Compose
-	@echo "Starting tg-cc bot..."
+run: run-native ## Start the bot natively (alias for run-native)
+
+run-native: ## Start the bot natively using Python
+	@echo "Starting tg-cc bot natively..."
+	./tg-cc
+
+run-docker: ## Start the bot using Docker Compose
+	@echo "Starting tg-cc bot in Docker..."
 	docker-compose up -d
 
 run-foreground: ## Start the bot in foreground

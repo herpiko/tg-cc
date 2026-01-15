@@ -32,8 +32,10 @@ This project is subject to changes as it is still in **active and heavy developm
 
 ## Features
 
-- **Multiple Commands**: `/ask`, `/feat`, `/feedback`, `/fix`, `/init`, `/cost`
+- **Multiple Commands**: `/ask`, `/feat`, `/fix`, `/plan`, `/feedback`, `/init`, `/up`, `/stop`, `/status`, `/cancel`, `/log`, `/cost`
 - **Project Management**: Configure multiple projects via YAML
+- **Session Continuity**: `/feedback` continues context from previous `/feat` or `/fix`
+- **Process Management**: Spin up and stop project processes
 - **Authorization**: User and group-based access control
 - **Execution Tracking**: Automatic timing and logging
 - **Git Integration**: Automatic repository cloning
@@ -125,17 +127,17 @@ For detailed Docker setup instructions, troubleshooting, and advanced configurat
    cd tg-cc
    ```
 
-2. **Install dependencies:**
+2. **Install the package:**
+   ```bash
+   pip install -e .
+   ```
+
+   Or install dependencies only:
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Make the script executable:**
-   ```bash
-   chmod +x tg-cc
-   ```
-
-4. **Configure config.yaml:**
+3. **Configure config.yaml:**
    Edit `config.yaml` to set up:
    - Authorized users
    - Authorized groups
@@ -162,6 +164,9 @@ feat_rules: |
 fix_rules: |
   - Rules for /fix command
 
+plan_rules: |
+  - Rules for /plan command
+
 feedback_rules: |
   - Rules for /feedback command
 
@@ -169,6 +174,7 @@ projects:
   - project_name: "my-project"
     project_repo: "git@github.com:user/repo.git"
     project_workdir: "/path/to/workdir"
+    project_up: "make run"  # Optional: command to spin up the project
 ```
 
 ## Usage
@@ -180,9 +186,19 @@ projects:
 docker-compose up -d
 ```
 
-**Manual execution:**
+**Manual execution (after pip install -e .):**
 ```bash
-./tg-cc --api-token YOUR_TELEGRAM_BOT_TOKEN
+tg-cc
+```
+
+**Or run as a module:**
+```bash
+python -m tg_cc
+```
+
+**With custom config path:**
+```bash
+tg-cc --config /path/to/config.yaml
 ```
 
 ### Available Commands
@@ -219,12 +235,62 @@ Fix bugs in a specific project (currently placeholder).
 /fix my-project Resolve the memory leak in the cache module
 ```
 
+#### `/plan <project-name> <task>`
+Plan and explore a task. Creates a new branch with `plan-` prefix. Good for design, exploration, and documentation before implementation.
+
+**Example:**
+```
+/plan my-project Design the new authentication system architecture
+```
+
 #### `/init <project-name>`
 Initialize CLAUDE.md for a project.
 
 **Example:**
 ```
 /init my-project
+```
+
+#### `/up <project-name>`
+Spin up a project using the configured `project_up` command.
+
+**Example:**
+```
+/up my-project
+```
+
+#### `/stop <project-name>`
+Stop a running project process.
+
+**Example:**
+```
+/stop my-project
+```
+
+#### `/status`
+Show all running project processes with their PIDs.
+
+**Example:**
+```
+/status
+```
+
+#### `/cancel [project-name]`
+Cancel a running Claude query to save tokens. If no project is specified, cancels all running queries.
+
+**Example:**
+```
+/cancel my-project
+/cancel
+```
+
+#### `/log <project-name> [lines]`
+Show the last N lines of a running project's logs (default: 50 lines).
+
+**Example:**
+```
+/log my-project
+/log my-project 100
 ```
 
 #### `/cost`

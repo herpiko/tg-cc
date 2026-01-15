@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (`tg-cc`) that integrates Claude AI to perform software development tasks through chat commands. The bot executes Claude Code CLI with `--dangerously-skip-permissions` flag to perform complex development operations on configured projects.
+This is a Telegram bot (`tg-cc`) that integrates Claude AI to perform software development tasks through chat commands. The bot uses the Claude Code Agent SDK (`claude-agent-sdk`) with `bypassPermissions` mode to perform complex development operations on configured projects.
 
 **Security Notice**: This bot MUST run in an isolated environment (VM, container, or dedicated machine). It has full file system access and executes arbitrary commands via Claude.
 
@@ -12,7 +12,7 @@ This is a Telegram bot (`tg-cc`) that integrates Claude AI to perform software d
 
 Start the bot:
 ```bash
-./tg-cc --api-token YOUR_TELEGRAM_BOT_TOKEN
+./tg-cc --tg-api-token YOUR_TELEGRAM_BOT_TOKEN
 ```
 
 The bot requires:
@@ -58,11 +58,11 @@ projects:
    - Returns False if either check fails
 
 3. **Helper Functions**:
-   - `run_claude_command(cmd, cwd, request_uuid)`: Executes Claude with timing tracking
+   - `run_claude_query(prompt, system_prompt, cwd)`: Executes Claude query using SDK with timing tracking
    - `process_output_file(update, output_file, duration_minutes)`: Reads output file, sends to user, appends execution time, cleans up
    - `cleanup_output_file(output_file)`: Cleanup utility for error cases
    - `clone_repository_if_needed(update, project_repo, project_workdir)`: Clones repository if directory doesn't exist
-   - `initialize_claude_md_if_needed(update, project_workdir)`: Checks for CLAUDE.md, runs `claude /init` if missing
+   - `initialize_claude_md_if_needed(update, project_workdir)`: Checks for CLAUDE.md, runs `claude /init` via SDK if missing
 
 4. **Command Handlers**:
    - `/ask`: General questions without project context
@@ -81,11 +81,11 @@ projects:
 6. Generate UUID for this request
 7. Create `/tmp/output_{uuid}.txt` path
 8. Build prompt with project info and output file path
-9. Execute Claude CLI with:
-   - `--dangerously-skip-permissions`
-   - `--verbose`
-   - `--system-prompt` with appropriate rules
-   - Working directory set to project_workdir
+9. Execute Claude query via SDK with:
+   - `permission_mode='bypassPermissions'`
+   - `system_prompt` with appropriate rules
+   - `cwd` set to project_workdir
+   - `setting_sources=["project"]` to load CLAUDE.md
 10. Read output file and send to user
 11. Clean up output file
 
@@ -98,11 +98,12 @@ projects:
 - File is sent to user (truncated at 4000 chars for Telegram limits)
 - File is deleted after sending
 
-### Subprocess Execution
+### SDK and Subprocess Execution
 
-- All Claude commands use 30-minute timeout (1800 seconds)
-- Commands executed via `subprocess.run()` with list arguments (handles spaces/newlines automatically)
-- Git operations also have 30-minute timeout
+- Claude queries are executed via the Claude Code Agent SDK (`claude-agent-sdk`)
+- SDK uses `query()` function with `ClaudeAgentOptions` for configuration
+- Git operations use `subprocess.run()` with 30-minute timeout
+- The SDK internally manages the Claude CLI process
 
 ## Command Specifics
 
@@ -175,6 +176,5 @@ projects:
 - Missing project: Show available projects
 - Git clone failure: Show error and abort
 - CLAUDE.md initialization failure: Show error and abort
-- Command timeout: 30-minute limit
-- Subprocess errors: Log and notify user
+- SDK query errors: Log and notify user
 - Missing output file: Error message to user

@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tg-cc"
+version = "0.1.0"
+description = "Telegram bot that integrates Claude AI for software development tasks"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Herpiko Dwi Aguno"}
+]
+keywords = ["telegram", "bot", "claude", "ai", "development"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+dependencies = [
+    "python-telegram-bot>=20.0",
+    "PyYAML>=6.0",
+    "claude-agent-sdk>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=23.0",
+    "isort>=5.0",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+tg-cc = "tg_cc.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/herpiko/tg-cc"
+Repository = "https://github.com/herpiko/tg-cc"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tg_cc*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
