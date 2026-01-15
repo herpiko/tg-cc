@@ -153,7 +153,11 @@ authorized_users:
   - "your_telegram_username"
 
 authorized_groups:
-  - "-1234567890"  # Your group chat ID
+  # New format with optional sub (thread_id) for topics/threads:
+  - group: "-1234567890"
+    sub: "12345"  # Optional: thread_id for topic/subgroup
+  # Legacy format (still supported):
+  - "-9876543210"
 
 ask_rules: |
   - Rules for /ask command

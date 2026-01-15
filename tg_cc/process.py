@@ -6,7 +6,16 @@ import signal
 import subprocess
 from collections import deque
 
+from . import config
+
 logger = logging.getLogger(__name__)
+
+
+async def _reply(update, text: str):
+    """Reply to a message, sending to the configured thread if set."""
+    chat_id = str(update.message.chat.id)
+    thread_id = config.get_thread_id(chat_id)
+    await update.message.reply_text(text, message_thread_id=thread_id)
 
 
 # Process storage for running project instances: {project_name: (subprocess.Popen, log_file_path)}
@@ -23,7 +32,7 @@ async def spin_up_project(update, project_name: str, project_workdir: str, proje
     await kill_project_process(update, project_name, silent=True)
 
     try:
-        await update.message.reply_text(f"Spinning up project {project_name}...")
+        await _reply(update,f"Spinning up project {project_name}...")
         logger.info(f"Running project_up command for {project_name}: {project_up}")
 
         # Create log file for output
@@ -42,12 +51,12 @@ async def spin_up_project(update, project_name: str, project_workdir: str, proje
 
         PROJECT_PROCESSES[project_name] = (process, log_file_path, log_file)
         logger.info(f"Started process {process.pid} for project {project_name}, logging to {log_file_path}")
-        await update.message.reply_text(f"Project {project_name} started (PID: {process.pid})")
+        await _reply(update,f"Project {project_name} started (PID: {process.pid})")
         return True
 
     except Exception as e:
         logger.error(f"Error spinning up project {project_name}: {e}")
-        await update.message.reply_text(f"Error spinning up project: {str(e)}")
+        await _reply(update,f"Error spinning up project: {str(e)}")
         return False
 
 
@@ -56,7 +65,7 @@ async def kill_project_process(update, project_name: str, silent: bool = False) 
     process_info = PROJECT_PROCESSES.get(project_name)
     if not process_info:
         if not silent:
-            await update.message.reply_text(f"No running process found for project {project_name}")
+            await _reply(update,f"No running process found for project {project_name}")
         return False
 
     process, log_file_path, log_file = process_info
@@ -67,19 +76,19 @@ async def kill_project_process(update, project_name: str, silent: bool = False) 
         process.wait(timeout=5)
         logger.info(f"Killed process {process.pid} for project {project_name}")
         if not silent:
-            await update.message.reply_text(f"Stopped project {project_name} (PID: {process.pid})")
+            await _reply(update,f"Stopped project {project_name} (PID: {process.pid})")
     except subprocess.TimeoutExpired:
         # Force kill if SIGTERM didn't work
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         logger.info(f"Force killed process {process.pid} for project {project_name}")
         if not silent:
-            await update.message.reply_text(f"Force stopped project {project_name} (PID: {process.pid})")
+            await _reply(update,f"Force stopped project {project_name} (PID: {process.pid})")
     except ProcessLookupError:
         logger.info(f"Process {process.pid} for project {project_name} already terminated")
     except Exception as e:
         logger.error(f"Error killing process for {project_name}: {e}")
         if not silent:
-            await update.message.reply_text(f"Error stopping project: {str(e)}")
+            await _reply(update,f"Error stopping project: {str(e)}")
         return False
 
     # Close log file

@@ -25,13 +25,16 @@ async def send_startup_messages(application: Application) -> None:
     """Send startup notification to all authorized groups."""
     logger.info("Sending startup notifications to authorized groups...")
 
-    for group_id in config.AUTHORIZED_GROUPS:
+    for group_id in config.get_authorized_group_ids():
         try:
+            thread_id = config.get_thread_id(group_id)
             await application.bot.send_message(
                 chat_id=group_id,
-                text="Bot is now online and ready to receive commands."
+                text="Bot is now online and ready to receive commands.",
+                message_thread_id=thread_id
             )
-            logger.info(f"Sent startup message to group {group_id}")
+            thread_info = f" (thread {thread_id})" if thread_id else ""
+            logger.info(f"Sent startup message to group {group_id}{thread_info}")
         except Exception as e:
             logger.error(f"Failed to send startup message to group {group_id}: {e}")
 
@@ -60,6 +63,7 @@ def run(config_path: str = None):
     application.add_handler(CommandHandler("cancel", handlers.cmd_cancel))
     application.add_handler(CommandHandler("log", handlers.cmd_log))
     application.add_handler(CommandHandler("cost", handlers.cmd_cost))
+    application.add_handler(CommandHandler("selfupdate", handlers.cmd_selfupdate))
 
     # Register message handler for mentions
     application.add_handler(MessageHandler(

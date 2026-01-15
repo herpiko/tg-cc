@@ -1,8 +1,10 @@
+telegram_bot_token: 8251384318:AAHYlxMDvZ2X9xcPKYIgyMQg1tNHAfw3juQ
 authorized_users:
   - "herpiko"
 
 authorized_groups:
-  - "-9999999999"
+  - group: "-9999"
+    sub: "9999"  # Optional: thread_id for topic/subgroup
 
 general_rules: |
   - Avoid using too much emojis.
@@ -59,6 +61,29 @@ fix_rules: |
     - Create merge request. Target branch should be `main` except if stated otherwise.
   - Write very short summary of your work into the output.txt, alongside with the merge request link (if any).
 
+plan_rules: |
+  - If in the working directory there is no code, clone the repository into that directory. Please utilize git.
+  - Before starting any work, make sure your current branch is clean (no uncommitted changes).
+  - Always create a new branch for your task before making any edits.
+  - Name the new branch based on the context of the task:
+  - Use the prefix plan- for planning tasks.
+  - Example branch names:
+    - plan-refactor-auth
+    - plan-new-api-design
+  - This ensures a clean workflow and keeps commits well organized.
+  - Focus on planning, exploration, and documentation rather than full implementation.
+  - Create design documents, architecture diagrams (in text), or implementation plans.
+  - You may write skeleton code or prototypes to validate ideas.
+  - Always follow and respect the existing rules and conventions within the codebase.
+  - Maintain consistency with the established naming conventions, formatting, and architecture.
+  - Please utilize glab command to work with Gitlab features.
+  - If there is no code changes, do not create a merge request.
+  - The output of the task, other than code changes, are:
+    - Commit the changes
+    - Push the branch
+    - Create merge request. Target branch should be `main` except if stated otherwise.
+  - Write very short summary of your work into the output.txt, alongside with the merge request link (if any).
+
 feedback_rules: |
   - We well continue the existing work branch. Do not clone the repository or clean the branch or switch branch.
   - Always follow and respect the existing rules and conventions within the codebase.
@@ -75,9 +100,8 @@ feedback_rules: |
   - Write very short summary of your work into the output.txt, alongside with the merge request link (if any).
 
 projects:
-  - project_name: "foobar-frontend"
-    project_repo: "git@gitlab.com:foobar/foobar-frontend.git"
-    project_workdir: "/home/user/src/foobar-frontend"
-  - project_name: "foobar-backend"
-    project_repo: "git@gitlab.com:foobar/foobar-backend.git"
-    project_workdir: "/home/user/src/foobar-backend"
+  - project_name: "sdk-be"
+    project_repo: "git@gitlab.com:foo/bar.git"
+    project_workdir: "/home/herpiko/src/bar-by-agent"
+    project_up: "make run"
+    project_reset: "make purge"

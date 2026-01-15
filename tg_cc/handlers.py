@@ -27,9 +27,16 @@ def is_authorized(update: Update) -> bool:
     logger.info(f"Checking authorization for user: {username}, chat_id: {chat_id}")
 
     user_authorized = username in config.AUTHORIZED_USERS
-    group_authorized = chat_id in config.AUTHORIZED_GROUPS
+    group_authorized = config.is_group_authorized(chat_id)
 
     return user_authorized and group_authorized
+
+
+async def reply(update: Update, text: str):
+    """Reply to a message, sending to the configured thread if set."""
+    chat_id = str(update.message.chat.id)
+    thread_id = config.get_thread_id(chat_id)
+    await update.message.reply_text(text, message_thread_id=thread_id)
 
 
 async def process_output_file(update, output_file: str, duration_minutes: float):
@@ -44,16 +51,16 @@ async def process_output_file(update, output_file: str, duration_minutes: float)
 
         if output_content:
             if len(output_content) > 4000:
-                await update.message.reply_text( output_content[:4000] + "\n\n[Output truncated...]")
+                await reply(update, output_content[:4000] + "\n\n[Output truncated...]")
             else:
-                await update.message.reply_text( output_content)
+                await reply(update, output_content)
         else:
-            await update.message.reply_text( f"Command completed but {output_file} is empty")
+            await reply(update, f"Command completed but {output_file} is empty")
 
         os.remove(output_file)
         logger.info(f"Cleaned up {output_file}")
     else:
-        await update.message.reply_text( f"Error: {output_file} was not created by Claude")
+        await reply(update, f"Error: {output_file} was not created by Claude")
 
 
 def cleanup_output_file(output_file: str):
@@ -72,7 +79,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use bot")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     message = update.message
@@ -110,11 +117,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         text_without_mention = message.text.replace(bot_username, "").strip()
         logger.info(f"Bot was mentioned! Replying...")
 
-        thread_id = message.message_thread_id
         if text_without_mention:
-            await message.reply_text(text_without_mention, message_thread_id=thread_id)
+            await reply(update, text_without_mention)
         else:
-            await message.reply_text("Hello", message_thread_id=thread_id)
+            await reply(update, "Hello")
 
         logger.info(f"Reply sent!")
     else:
@@ -130,13 +136,13 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /ask command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /ask command")
 
     if not context.args or len(context.args) < 2:
-        await update.message.reply_text( "Usage: /ask project-name query")
+        await reply(update, "Usage: /ask project-name query")
         return
 
     project_name = context.args[0]
@@ -144,7 +150,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     project_repo = project['project_repo']
@@ -156,7 +162,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await claude.initialize_claude_md(update, project_workdir):
         return
 
-    await update.message.reply_text( f"Processing for project: {project_name}...")
+    await reply(update, f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
     output_file = f"/tmp/output_{request_uuid}.txt"
@@ -177,7 +183,7 @@ Write the output in {output_file}"""
 
     except Exception as e:
         logger.error(f"Error running query: {e}")
-        await update.message.reply_text( f"Error: {str(e)}")
+        await reply(update, f"Error: {str(e)}")
         cleanup_output_file(output_file)
 
 
@@ -190,13 +196,13 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /feat command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /feat command")
 
     if not context.args or len(context.args) < 2:
-        await update.message.reply_text( "Usage: /feat project-name prompt")
+        await reply(update, "Usage: /feat project-name prompt")
         return
 
     project_name = context.args[0]
@@ -204,7 +210,7 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     project_repo = project['project_repo']
@@ -222,7 +228,7 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Clear existing session for this project (starting fresh)
     claude.clear_session(project_name)
 
-    await update.message.reply_text( f"Processing for project: {project_name}...")
+    await reply(update, f"Processing for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
     output_file = f"/tmp/output_{request_uuid}.txt"
@@ -247,7 +253,7 @@ Write the output in {output_file}"""
 
     except Exception as e:
         logger.error(f"Error running query: {e}")
-        await update.message.reply_text( f"Error: {str(e)}")
+        await reply(update, f"Error: {str(e)}")
         cleanup_output_file(output_file)
 
 
@@ -260,13 +266,13 @@ async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /fix command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /fix command")
 
     if not context.args or len(context.args) < 2:
-        await update.message.reply_text( "Usage: /fix project-name prompt")
+        await reply(update, "Usage: /fix project-name prompt")
         return
 
     project_name = context.args[0]
@@ -274,7 +280,7 @@ async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     project_repo = project['project_repo']
@@ -286,7 +292,7 @@ async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await claude.initialize_claude_md(update, project_workdir):
         return
 
-    await update.message.reply_text( f"Processing for project: {project_name}...")
+    await reply(update, f"Processing for project: {project_name}...")
 
     if not await git.refresh_to_main_branch(update, project_workdir):
         return
@@ -317,7 +323,7 @@ Write the output in {output_file}"""
 
     except Exception as e:
         logger.error(f"Error running query: {e}")
-        await update.message.reply_text( f"Error: {str(e)}")
+        await reply(update, f"Error: {str(e)}")
         cleanup_output_file(output_file)
 
 
@@ -330,13 +336,13 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /plan command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /plan command")
 
     if not context.args or len(context.args) < 2:
-        await update.message.reply_text( "Usage: /plan project-name prompt")
+        await reply(update, "Usage: /plan project-name prompt")
         return
 
     project_name = context.args[0]
@@ -344,7 +350,7 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     project_repo = project['project_repo']
@@ -362,7 +368,7 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Clear existing session for this project (starting fresh)
     claude.clear_session(project_name)
 
-    await update.message.reply_text( f"Planning for project: {project_name}...")
+    await reply(update, f"Planning for project: {project_name}...")
 
     request_uuid = str(uuid.uuid4())
     output_file = f"/tmp/output_{request_uuid}.txt"
@@ -387,7 +393,7 @@ Write the output in {output_file}"""
 
     except Exception as e:
         logger.error(f"Error running query: {e}")
-        await update.message.reply_text( f"Error: {str(e)}")
+        await reply(update, f"Error: {str(e)}")
         cleanup_output_file(output_file)
 
 
@@ -400,13 +406,13 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /feedback command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /feedback command")
 
     if not context.args or len(context.args) < 2:
-        await update.message.reply_text( "Usage: /feedback project-name prompt")
+        await reply(update, "Usage: /feedback project-name prompt")
         return
 
     project_name = context.args[0]
@@ -414,7 +420,7 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     project_repo = project['project_repo']
@@ -429,10 +435,10 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # Get existing session for this project (to continue conversation)
     existing_session = claude.get_session(project_name)
     if existing_session:
-        await update.message.reply_text( f"Continuing session for project: {project_name}...")
+        await reply(update, f"Continuing session for project: {project_name}...")
         logger.info(f"Resuming session {existing_session} for project {project_name}")
     else:
-        await update.message.reply_text( f"No existing session found. Starting new session for project: {project_name}...")
+        await reply(update, f"No existing session found. Starting new session for project: {project_name}...")
         logger.info(f"No existing session for project {project_name}, starting fresh")
 
     request_uuid = str(uuid.uuid4())
@@ -458,7 +464,7 @@ Write the output in {output_file}"""
 
     except Exception as e:
         logger.error(f"Error running query: {e}")
-        await update.message.reply_text( f"Error: {str(e)}")
+        await reply(update, f"Error: {str(e)}")
         cleanup_output_file(output_file)
 
 
@@ -471,20 +477,20 @@ async def cmd_init(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /init command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /init command")
 
     if not context.args or len(context.args) < 1:
-        await update.message.reply_text( "Usage: /init project-name")
+        await reply(update, "Usage: /init project-name")
         return
 
     project_name = context.args[0]
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     project_repo = project['project_repo']
@@ -501,10 +507,10 @@ async def cmd_init(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await process.spin_up_project(update, project_name, project_workdir, project_up)
 
     if not init_success:
-        await update.message.reply_text( f"Failed to initialize CLAUDE.md for project: {project_name}")
+        await reply(update, f"Failed to initialize CLAUDE.md for project: {project_name}")
         return
 
-    await update.message.reply_text( f"Successfully initialized CLAUDE.md for project: {project_name}")
+    await reply(update, f"Successfully initialized CLAUDE.md for project: {project_name}")
 
 
 async def cmd_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -516,27 +522,27 @@ async def cmd_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /up command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /up command")
 
     if not context.args or len(context.args) < 1:
-        await update.message.reply_text( "Usage: /up project-name")
+        await reply(update, "Usage: /up project-name")
         return
 
     project_name = context.args[0]
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     project_workdir = project['project_workdir']
     project_up = project.get('project_up')
 
     if not project_up:
-        await update.message.reply_text( f"No project_up command configured for {project_name}")
+        await reply(update, f"No project_up command configured for {project_name}")
         return
 
     await process.spin_up_project(update, project_name, project_workdir, project_up)
@@ -551,20 +557,20 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /stop command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /stop command")
 
     if not context.args or len(context.args) < 1:
-        await update.message.reply_text( "Usage: /stop project-name")
+        await reply(update, "Usage: /stop project-name")
         return
 
     project_name = context.args[0]
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     await process.kill_project_process(update, project_name)
@@ -579,14 +585,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /status command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /status command")
 
     running_projects = process.get_running_projects()
     if not running_projects:
-        await update.message.reply_text( "No running projects.")
+        await reply(update, "No running projects.")
         return
 
     status_lines = ["Running projects:"]
@@ -598,7 +604,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         else:
             status_lines.append(f"  - {project_name} (PID: {proc.pid}, exited with code {proc.returncode})")
 
-    await update.message.reply_text( "\n".join(status_lines))
+    await reply(update, "\n".join(status_lines))
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -610,7 +616,7 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /cancel command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /cancel command")
@@ -619,7 +625,7 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not context.args or len(context.args) < 1:
         running = claude.get_all_running_queries()
         if not running:
-            await update.message.reply_text( "No running queries to cancel.")
+            await reply(update, "No running queries to cancel.")
             return
 
         # Cancel all running queries
@@ -629,29 +635,29 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 cancelled.append(project_name)
 
         if cancelled:
-            await update.message.reply_text( f"Cancelled queries for: {', '.join(cancelled)}")
+            await reply(update, f"Cancelled queries for: {', '.join(cancelled)}")
         else:
-            await update.message.reply_text( "No queries were cancelled.")
+            await reply(update, "No queries were cancelled.")
         return
 
     project_name = context.args[0]
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     # Check if there's a running query for this project
     task = claude.get_running_query(project_name)
     if not task or task.done():
-        await update.message.reply_text( f"No running query for project {project_name}.")
+        await reply(update, f"No running query for project {project_name}.")
         return
 
     # Cancel the query
     if claude.cancel_query(project_name):
-        await update.message.reply_text( f"Cancelled query for project {project_name}.")
+        await reply(update, f"Cancelled query for project {project_name}.")
     else:
-        await update.message.reply_text( f"Failed to cancel query for project {project_name}.")
+        await reply(update, f"Failed to cancel query for project {project_name}.")
 
 
 async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -663,13 +669,13 @@ async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /log command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /log command")
 
     if not context.args or len(context.args) < 1:
-        await update.message.reply_text( "Usage: /log project-name [lines]\nDefault: 50 lines")
+        await reply(update, "Usage: /log project-name [lines]\nDefault: 50 lines")
         return
 
     project_name = context.args[0]
@@ -681,23 +687,23 @@ async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             lines = int(context.args[1])
             lines = min(max(lines, 1), 200)  # Clamp between 1 and 200
         except ValueError:
-            await update.message.reply_text( "Invalid number of lines. Using default (50).")
+            await reply(update, "Invalid number of lines. Using default (50).")
 
     project = config.get_project(project_name)
     if not project:
-        await update.message.reply_text( f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+        await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
     # Check if project is running
     is_running, pid, _ = process.get_process_status(project_name)
     if not is_running and pid is None:
-        await update.message.reply_text( f"No running instance found for project {project_name}. Use /up to start it.")
+        await reply(update, f"No running instance found for project {project_name}. Use /up to start it.")
         return
 
     # Get logs
     logs = process.get_project_logs(project_name, lines)
     if not logs:
-        await update.message.reply_text( f"No logs available for project {project_name}.")
+        await reply(update, f"No logs available for project {project_name}.")
         return
 
     # Format output
@@ -708,7 +714,7 @@ async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if len(output) > 4000:
         output = output[:4000] + "\n\n[Output truncated...]"
 
-    await update.message.reply_text( output)
+    await reply(update, output)
 
 
 async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -720,12 +726,12 @@ async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         logger.info("Unauthorized user attempted to use /cost command")
         authorized_list = ", ".join(config.AUTHORIZED_USERS)
-        await update.message.reply_text( f"I only respond to {authorized_list}")
+        await reply(update, f"I only respond to {authorized_list}")
         return
 
     logger.info("Received /cost command")
 
-    await update.message.reply_text( "Fetching Claude usage costs...")
+    await reply(update, "Fetching Claude usage costs...")
 
     log_file = "claude-monitor.log"
 
@@ -757,19 +763,19 @@ Please edit the {log_file}, just take the Summary, remove everything else. Also 
 
             if log_content:
                 if len(log_content) > 4000:
-                    await update.message.reply_text( log_content[:4000] + "\n\n[Output truncated...]")
+                    await reply(update, log_content[:4000] + "\n\n[Output truncated...]")
                 else:
-                    await update.message.reply_text( log_content)
+                    await reply(update, log_content)
             else:
-                await update.message.reply_text( "No cost data available in log file.")
+                await reply(update, "No cost data available in log file.")
         else:
-            await update.message.reply_text( "claude-monitor.log file not found. Make sure claude-monitor is installed.")
+            await reply(update, "claude-monitor.log file not found. Make sure claude-monitor is installed.")
 
     except subprocess.TimeoutExpired:
-        await update.message.reply_text( "Command timed out after 30 seconds")
+        await reply(update, "Command timed out after 30 seconds")
     except Exception as e:
         logger.error(f"Error running claude-monitor command: {e}")
-        await update.message.reply_text( f"Error fetching cost data: {str(e)}")
+        await reply(update, f"Error fetching cost data: {str(e)}")
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -820,6 +826,107 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
   Show last N lines of project logs (default: 50)
 
 /cost
-  Display Claude API usage costs"""
+  Display Claude API usage costs
 
-    await update.message.reply_text( help_text)
+/selfupdate
+  Update bot from GitHub and restart"""
+
+    await reply(update, help_text)
+
+
+async def cmd_selfupdate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /selfupdate command. Updates bot from GitHub and restarts."""
+    import sys
+    import shutil
+
+    if not update.message:
+        logger.info("Received /selfupdate command with no message object")
+        return
+
+    if not is_authorized(update):
+        logger.info("Unauthorized user attempted to use /selfupdate command")
+        authorized_list = ", ".join(config.AUTHORIZED_USERS)
+        await reply(update, f"I only respond to {authorized_list}")
+        return
+
+    logger.info("Received /selfupdate command")
+
+    # Get the bot's installation directory
+    bot_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    config_path = os.path.join(bot_dir, "config.yaml")
+    config_backup_path = os.path.join("/tmp", "tg_cc_config_backup.yaml")
+
+    await reply(update, "Starting self-update...")
+
+    try:
+        # Backup config.yaml
+        if os.path.exists(config_path):
+            shutil.copy2(config_path, config_backup_path)
+            logger.info(f"Backed up config.yaml to {config_backup_path}")
+
+        # Fetch latest from origin
+        await reply(update, "Fetching latest code from GitHub...")
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=bot_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if fetch_result.returncode != 0:
+            await reply(update, f"Failed to fetch: {fetch_result.stderr[:500]}")
+            return
+
+        # Reset to origin/main
+        reset_result = subprocess.run(
+            ["git", "reset", "--hard", "origin/main"],
+            cwd=bot_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if reset_result.returncode != 0:
+            await reply(update, f"Failed to reset: {reset_result.stderr[:500]}")
+            return
+
+        # Restore config.yaml
+        if os.path.exists(config_backup_path):
+            shutil.copy2(config_backup_path, config_path)
+            logger.info(f"Restored config.yaml from backup")
+
+        # Reinstall package (in case dependencies changed)
+        await reply(update, "Reinstalling package...")
+        pip_result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", "."],
+            cwd=bot_dir,
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+
+        if pip_result.returncode != 0:
+            await reply(update, f"Warning: pip install failed: {pip_result.stderr[:500]}")
+            # Continue anyway, the code update might still work
+
+        await reply(update, "Update complete! Restarting bot...")
+        logger.info("Self-update complete, restarting...")
+
+        # Give telegram time to send the message
+        import asyncio
+        await asyncio.sleep(1)
+
+        # Restart the process
+        os.execv(sys.executable, [sys.executable, "-m", "tg_cc"] + sys.argv[1:])
+
+    except subprocess.TimeoutExpired:
+        await reply(update, "Update timed out")
+    except Exception as e:
+        logger.error(f"Error during self-update: {e}")
+        await reply(update, f"Error during self-update: {str(e)}")
+
+        # Try to restore config if something went wrong
+        if os.path.exists(config_backup_path) and not os.path.exists(config_path):
+            shutil.copy2(config_backup_path, config_path)
+            logger.info("Restored config.yaml after error")
