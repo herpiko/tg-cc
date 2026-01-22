@@ -6,7 +6,7 @@ stages:
   - deploy
 
 variables:
-  DOCKER_IMAGE: herpiko/tg-cc
+  DOCKER_IMAGE: herpiko/tgcc
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: "/certs"
 
@@ -83,7 +83,7 @@ push:tag:
 #     - chmod 700 ~/.ssh
 #     - ssh-keyscan $DEPLOY_HOST >> ~/.ssh/known_hosts
 #   script:
-#     - ssh $DEPLOY_USER@$DEPLOY_HOST "cd /path/to/tg-cc && docker-compose pull && docker-compose up -d"
+#     - ssh $DEPLOY_USER@$DEPLOY_HOST "cd /path/to/tgcc && docker-compose pull && docker-compose up -d"
 #   only:
 #     - main
 #   when: manual

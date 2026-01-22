@@ -40,9 +40,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the bot script
-COPY tg-cc .
-RUN chmod +x tg-cc
+# Copy the bot package and install
+COPY pyproject.toml .
+COPY tgcc/ tgcc/
+RUN pip install --no-cache-dir -e .
 
 # Create necessary directories
 RUN mkdir -p /root/.ssh \
@@ -58,4 +59,4 @@ RUN echo "Host *\n\
 # Expose no ports (bot uses Telegram API, no incoming connections needed)
 
 # Set the entrypoint
-ENTRYPOINT ["./tg-cc"]
+ENTRYPOINT ["tgcc"]

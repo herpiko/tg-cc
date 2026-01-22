@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  tg-cc:
-    image: herpiko/tg-cc:latest
-    container_name: tg-cc-bot
+  tgcc:
+    image: herpiko/tgcc:latest
+    container_name: tgcc-bot
     restart: unless-stopped
 
     # Build configuration (uncomment to build locally instead of using image)
@@ -16,9 +16,9 @@ services:
 
     # Labels for organization
     labels:
-      - "com.tg-cc.description=Telegram bot with Claude AI integration"
-      - "com.tg-cc.version=1.0"
-      - "com.tg-cc.maintainer=herpiko"
+      - "com.tgcc.description=Telegram bot with Claude AI integration"
+      - "com.tgcc.version=1.0"
+      - "com.tgcc.maintainer=herpiko"
 
     # Environment variables
     environment:
@@ -42,7 +42,7 @@ services:
       - workspace:/workspace
 
       # Temp directory for output files
-      - /tmp/tg-cc:/tmp
+      - /tmp/tgcc:/tmp
 
     # Security options - Run in isolated environment
     # WARNING: This bot has full filesystem access and runs dangerous commands

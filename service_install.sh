@@ -8,7 +8,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}=== tg-cc Systemd Service Installer ===${NC}"
+echo -e "${GREEN}=== tgcc Systemd Service Installer ===${NC}"
 echo
 
 # Check if running as root or can use sudo
@@ -23,7 +23,7 @@ else
 fi
 
 # Ask for service name suffix
-echo -e "${YELLOW}1. Enter the project/service name (will be prefixed with 'tg-cc-'):${NC}"
+echo -e "${YELLOW}1. Enter the project/service name (will be prefixed with 'tgcc-'):${NC}"
 read -p "   Service name suffix: " SERVICE_SUFFIX
 
 if [ -z "$SERVICE_SUFFIX" ]; then
@@ -33,7 +33,7 @@ fi
 
 # Sanitize service name (only allow alphanumeric and hyphens)
 SERVICE_SUFFIX=$(echo "$SERVICE_SUFFIX" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')
-SERVICE_NAME="tg-cc-${SERVICE_SUFFIX}"
+SERVICE_NAME="tgcc-${SERVICE_SUFFIX}"
 
 echo -e "   Service will be named: ${GREEN}${SERVICE_NAME}${NC}"
 echo
@@ -81,27 +81,27 @@ fi
 # Get the user's home directory
 USER_HOME=$(eval echo "~$RUN_USER")
 
-# Find tg-cc executable
-TG_CC_PATH=$(which tg-cc 2>/dev/null || echo "")
+# Find tgcc executable
+TG_CC_PATH=$(which tgcc 2>/dev/null || echo "")
 
 if [ -z "$TG_CC_PATH" ]; then
     # Try common locations
-    if [ -f "$USER_HOME/.local/bin/tg-cc" ]; then
-        TG_CC_PATH="$USER_HOME/.local/bin/tg-cc"
-    elif [ -f "/usr/local/bin/tg-cc" ]; then
-        TG_CC_PATH="/usr/local/bin/tg-cc"
+    if [ -f "$USER_HOME/.local/bin/tgcc" ]; then
+        TG_CC_PATH="$USER_HOME/.local/bin/tgcc"
+    elif [ -f "/usr/local/bin/tgcc" ]; then
+        TG_CC_PATH="/usr/local/bin/tgcc"
     else
-        echo -e "${YELLOW}   Could not find tg-cc in PATH. Enter the full path to tg-cc:${NC}"
-        read -p "   tg-cc path: " TG_CC_PATH
+        echo -e "${YELLOW}   Could not find tgcc in PATH. Enter the full path to tgcc:${NC}"
+        read -p "   tgcc path: " TG_CC_PATH
         TG_CC_PATH="${TG_CC_PATH/#\~/$USER_HOME}"
         if [ ! -f "$TG_CC_PATH" ]; then
-            echo -e "${RED}Error: tg-cc not found at: ${TG_CC_PATH}${NC}"
+            echo -e "${RED}Error: tgcc not found at: ${TG_CC_PATH}${NC}"
             exit 1
         fi
     fi
 fi
 
-echo -e "   Using tg-cc at: ${GREEN}${TG_CC_PATH}${NC}"
+echo -e "   Using tgcc at: ${GREEN}${TG_CC_PATH}${NC}"
 echo
 
 # Create the systemd service file
@@ -110,7 +110,7 @@ TEMP_SERVICE_FILE=$(mktemp)
 
 cat > "$TEMP_SERVICE_FILE" << EOF
 [Unit]
-Description=tg-cc Telegram Bot - ${SERVICE_SUFFIX}
+Description=tgcc Telegram Bot - ${SERVICE_SUFFIX}
 After=network.target
 
 [Service]

@@ -1,4 +1,4 @@
-# tg-cc
+# tgcc
 
 A Telegram bot that integrates Claude AI to help with software development tasks through chat commands. This bot can execute Claude Code with dangerous mode enabled to perform complex development tasks like implementing features, fixing bugs, and more. Imagine you are having a software development team but they are not human. Give them instructions then review their work before merge their changes.
 
@@ -60,7 +60,7 @@ Docker provides the isolated environment required for running this bot safely.
 1. **Clone the repository:**
    ```bash
    git clone <your-repo-url>
-   cd tg-cc
+   cd tgcc
    ```
 
 2. **Configure environment:**
@@ -109,12 +109,12 @@ Docker provides the isolated environment required for running this bot safely.
 # Build the image
 make build
 # or
-docker build -t herpiko/tg-cc:latest .
+docker build -t herpiko/tgcc:latest .
 
 # Push to Docker Hub
 make push
 # or
-docker push herpiko/tg-cc:latest
+docker push herpiko/tgcc:latest
 ```
 
 For detailed Docker setup instructions, troubleshooting, and advanced configuration, see [DOCKER.md](DOCKER.md).
@@ -124,7 +124,7 @@ For detailed Docker setup instructions, troubleshooting, and advanced configurat
 1. **Clone the repository:**
    ```bash
    git clone <your-repo-url>
-   cd tg-cc
+   cd tgcc
    ```
 
 2. **Install the package:**
@@ -192,17 +192,17 @@ docker-compose up -d
 
 **Manual execution (after pip install -e .):**
 ```bash
-tg-cc
+tgcc
 ```
 
 **Or run as a module:**
 ```bash
-python -m tg_cc
+python -m tgcc
 ```
 
 **With custom config path:**
 ```bash
-tg-cc --config /path/to/config.yaml
+tgcc --config /path/to/config.yaml
 ```
 
 ### Available Commands

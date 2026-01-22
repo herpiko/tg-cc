@@ -1,4 +1,4 @@
-"""Entry point for tg-cc bot."""
+"""Entry point for tgcc bot."""
 
 import argparse
 import os
@@ -7,7 +7,7 @@ from .bot import run
 
 
 def main():
-    """Main entry point for the tg-cc command."""
+    """Main entry point for the tgcc command."""
     parser = argparse.ArgumentParser(
         description="Telegram bot that integrates Claude AI for software development tasks."
     )

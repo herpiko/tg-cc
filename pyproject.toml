@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tg-cc"
+name = "tgcc"
 version = "0.1.0"
 description = "Telegram bot that integrates Claude AI for software development tasks"
 readme = "README.md"
@@ -23,10 +23,11 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development",
 ]
 dependencies = [
-    "python-telegram-bot>=20.0",
+    "python-telegram-bot>=22.0",
     "PyYAML>=6.0",
     "claude-agent-sdk>=0.1.0",
 ]
@@ -40,7 +41,7 @@ dev = [
 ]
 
 [project.scripts]
-tg-cc = "tg_cc.__main__:main"
+tgcc = "tgcc.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/herpiko/tg-cc"
@@ -48,7 +49,7 @@ Repository = "https://github.com/herpiko/tg-cc"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tg_cc*"]
+include = ["tgcc*"]
 
 [tool.black]
 line-length = 100

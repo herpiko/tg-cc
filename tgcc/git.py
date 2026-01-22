@@ -1,4 +1,4 @@
-"""Git operations for tg-cc bot."""
+"""Git operations for tgcc bot."""
 
 import logging
 import os

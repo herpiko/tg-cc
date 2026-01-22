@@ -1,4 +1,4 @@
-"""Claude SDK operations for tg-cc bot."""
+"""Claude SDK operations for tgcc bot."""
 
 import asyncio
 import logging
@@ -9,7 +9,12 @@ from datetime import datetime
 from claude_agent_sdk import (
     query,
     ClaudeAgentOptions,
-    ResultMessage
+    ResultMessage,
+    AssistantMessage,
+    TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
+    ToolResultBlock
 )
 
 from . import config
@@ -36,6 +41,7 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
     start_time = datetime.now()
 
     options = ClaudeAgentOptions(
+        model='opus',
         system_prompt=system_prompt,
         permission_mode='bypassPermissions',
         cwd=cwd,
@@ -53,11 +59,25 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
     session_id = None
     try:
         async for message in query(prompt=prompt, options=options):
-            if isinstance(message, ResultMessage):
+            if isinstance(message, AssistantMessage):
+                # Process each content block in the message
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        print(f"\n[Claude] {block.text}")
+                    elif isinstance(block, ThinkingBlock):
+                        print(f"\n[Thinking] {block.thinking}")
+                    elif isinstance(block, ToolUseBlock):
+                        print(f"\n[Tool: {block.name}] {block.input}")
+                    elif isinstance(block, ToolResultBlock):
+                        result_preview = str(block.content)[:500] if block.content else ""
+                        print(f"\n[Tool Result] {result_preview}{'...' if len(str(block.content or '')) > 500 else ''}")
+            elif isinstance(message, ResultMessage):
                 session_id = message.session_id
                 logger.info(f"Query completed: {message.subtype}, turns: {message.num_turns}, session_id: {session_id}")
+                print(f"\n[Completed] Turns: {message.num_turns}, Session: {session_id}")
                 if message.is_error:
                     logger.error(f"Query error: {message.result}")
+                    print(f"[Error] {message.result}")
     except asyncio.CancelledError:
         logger.info(f"Query cancelled for project {project_name}")
         raise
@@ -169,6 +189,7 @@ async def initialize_claude_md(update, project_workdir: str) -> bool:
 
         try:
             options = ClaudeAgentOptions(
+                model='opus',
                 permission_mode='bypassPermissions',
                 cwd=project_workdir
             )

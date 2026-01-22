@@ -1,7 +1,9 @@
-"""Main bot application for tg-cc."""
+"""Main bot application for tgcc."""
 
+import asyncio
 import logging
 import os
+import signal
 
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters
@@ -30,13 +32,31 @@ async def send_startup_messages(application: Application) -> None:
             thread_id = config.get_thread_id(group_id)
             await application.bot.send_message(
                 chat_id=group_id,
-                text="Bot is now online and ready to receive commands.",
+                text="Agent is now online and ready to receive commands.",
                 message_thread_id=thread_id
             )
             thread_info = f" (thread {thread_id})" if thread_id else ""
             logger.info(f"Sent startup message to group {group_id}{thread_info}")
         except Exception as e:
             logger.error(f"Failed to send startup message to group {group_id}: {e}")
+
+
+async def send_shutdown_messages(application: Application) -> None:
+    """Send shutdown notification to all authorized groups."""
+    logger.info("Sending shutdown notifications to authorized groups...")
+
+    for group_id in config.get_authorized_group_ids():
+        try:
+            thread_id = config.get_thread_id(group_id)
+            await application.bot.send_message(
+                chat_id=group_id,
+                text="Agent is going offline.",
+                message_thread_id=thread_id
+            )
+            thread_info = f" (thread {thread_id})" if thread_id else ""
+            logger.info(f"Sent shutdown message to group {group_id}{thread_info}")
+        except Exception as e:
+            logger.error(f"Failed to send shutdown message to group {group_id}: {e}")
 
 
 def run(config_path: str = None):
@@ -71,12 +91,39 @@ def run(config_path: str = None):
         handlers.handle_message
     ))
 
-    # Set up post-init hook to send startup messages
-    async def post_init(app: Application) -> None:
-        await send_startup_messages(app)
-
-    application.post_init = post_init
-
-    logger.info("Bot is starting...")
+    logger.info("Agent is starting...")
     logger.info("Listening for messages and commands...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+    # Run with custom signal handling to send shutdown messages
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    async def main():
+        async with application:
+            await application.start()
+            await application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+            # Send startup messages after application is ready
+            await send_startup_messages(application)
+
+            # Wait for stop signal
+            stop_event = asyncio.Event()
+
+            def signal_handler():
+                stop_event.set()
+
+            loop.add_signal_handler(signal.SIGINT, signal_handler)
+            loop.add_signal_handler(signal.SIGTERM, signal_handler)
+
+            await stop_event.wait()
+
+            # Send shutdown messages before stopping
+            await send_shutdown_messages(application)
+
+            await application.updater.stop()
+            await application.stop()
+
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.close()

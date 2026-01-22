@@ -1,13 +1,13 @@
 .PHONY: help build push run run-native run-docker stop restart logs clean prune backup restore
 
 # Docker image configuration
-IMAGE_NAME = herpiko/tg-cc
+IMAGE_NAME = herpiko/tgcc
 IMAGE_TAG = latest
 FULL_IMAGE = $(IMAGE_NAME):$(IMAGE_TAG)
 
 # Docker Compose configuration
 COMPOSE_FILE = docker-compose.yml
-CONTAINER_NAME = tg-cc-bot
+CONTAINER_NAME = tgcc-bot
 
 help: ## Show this help message
 	@echo "Available targets:"
@@ -32,27 +32,27 @@ pull: ## Pull the Docker image from Docker Hub
 run: run-native ## Start the bot natively (alias for run-native)
 
 run-native: ## Start the bot natively using Python
-	@echo "Starting tg-cc bot natively..."
-	./tg-cc
+	@echo "Starting tgcc bot natively..."
+	./tgcc
 
 run-docker: ## Start the bot using Docker Compose
-	@echo "Starting tg-cc bot in Docker..."
+	@echo "Starting tgcc bot in Docker..."
 	docker-compose up -d
 
 run-foreground: ## Start the bot in foreground
-	@echo "Starting tg-cc bot (foreground)..."
+	@echo "Starting tgcc bot (foreground)..."
 	docker-compose up
 
 stop: ## Stop the bot
-	@echo "Stopping tg-cc bot..."
+	@echo "Stopping tgcc bot..."
 	docker-compose stop
 
 restart: ## Restart the bot
-	@echo "Restarting tg-cc bot..."
+	@echo "Restarting tgcc bot..."
 	docker-compose restart
 
 down: ## Stop and remove the container
-	@echo "Stopping and removing tg-cc bot..."
+	@echo "Stopping and removing tgcc bot..."
 	docker-compose down
 
 logs: ## Show bot logs (follow mode)
@@ -65,7 +65,7 @@ status: ## Show container status
 	docker-compose ps
 
 exec: ## Execute shell in the running container
-	docker-compose exec tg-cc /bin/bash
+	docker-compose exec tgcc /bin/bash
 
 clean: ## Remove containers and volumes
 	@echo "Removing containers and volumes..."
@@ -82,7 +82,7 @@ prune-all: ## Remove all unused Docker resources including images
 backup: ## Backup the workspace volume
 	@echo "Backing up workspace volume..."
 	docker run --rm \
-		-v tg-cc_workspace:/workspace \
+		-v tgcc_workspace:/workspace \
 		-v $(PWD):/backup \
 		alpine tar czf /backup/workspace-backup-$$(date +%Y%m%d-%H%M%S).tar.gz -C /workspace .
 	@echo "Backup complete!"
@@ -94,19 +94,19 @@ restore: ## Restore workspace volume from backup (specify BACKUP_FILE=filename)
 	fi
 	@echo "Restoring workspace from $(BACKUP_FILE)..."
 	docker run --rm \
-		-v tg-cc_workspace:/workspace \
+		-v tgcc_workspace:/workspace \
 		-v $(PWD):/backup \
 		alpine tar xzf /backup/$(BACKUP_FILE) -C /workspace
 	@echo "Restore complete!"
 
 update: ## Pull latest image and restart
-	@echo "Updating tg-cc bot..."
+	@echo "Updating tgcc bot..."
 	docker-compose pull
 	docker-compose up -d
 	@echo "Update complete!"
 
 rebuild: ## Rebuild and restart the bot
-	@echo "Rebuilding and restarting tg-cc bot..."
+	@echo "Rebuilding and restarting tgcc bot..."
 	docker-compose build --no-cache
 	docker-compose up -d
 	@echo "Rebuild complete!"

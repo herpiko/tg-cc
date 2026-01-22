@@ -1,4 +1,4 @@
-"""Process management for tg-cc bot."""
+"""Process management for tgcc bot."""
 
 import logging
 import os
@@ -36,7 +36,7 @@ async def spin_up_project(update, project_name: str, project_workdir: str, proje
         logger.info(f"Running project_up command for {project_name}: {project_up}")
 
         # Create log file for output
-        log_file_path = f"/tmp/tg_cc_{project_name}.log"
+        log_file_path = f"/tmp/tgcc_{project_name}.log"
         log_file = open(log_file_path, 'w')
 
         # Run the command in background using Popen, redirect output to log file

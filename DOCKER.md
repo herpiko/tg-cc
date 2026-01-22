@@ -1,6 +1,6 @@
-# Docker Setup Guide for tg-cc
+# Docker Setup Guide for tgcc
 
-This guide provides detailed instructions for running the tg-cc Telegram bot using Docker.
+This guide provides detailed instructions for running the tgcc Telegram bot using Docker.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ Before you begin, ensure you have:
 1. **Clone the repository:**
    ```bash
    git clone <your-repo-url>
-   cd tg-cc
+   cd tgcc
    ```
 
 2. **Initial setup:**
@@ -63,7 +63,7 @@ Before you begin, ensure you have:
 1. **Clone the repository:**
    ```bash
    git clone <your-repo-url>
-   cd tg-cc
+   cd tgcc
    ```
 
 2. **Create environment file:**
@@ -97,19 +97,19 @@ Before you begin, ensure you have:
 
 6. **Check logs:**
    ```bash
-   docker-compose logs -f tg-cc
+   docker-compose logs -f tgcc
    ```
 
 ## Directory Structure
 
 ```
-tg-cc/
+tgcc/
 ├── Dockerfile              # Docker image definition
 ├── docker-compose.yml      # Docker Compose configuration
 ├── .env                    # Environment variables (create from .env.example)
 ├── .env.example            # Example environment file
 ├── config.yaml             # Bot configuration
-├── tg-cc                   # Main bot script
+├── tgcc                   # Main bot script
 ├── requirements.txt        # Python dependencies
 └── DOCKER.md              # This file
 ```
@@ -163,7 +163,7 @@ The Docker container requires several volume mounts for proper operation:
 
 ### 6. Temporary Files
 ```yaml
-- /tmp/tg-cc:/tmp
+- /tmp/tgcc:/tmp
 ```
 - **Purpose:** Output files from Claude commands
 - **Type:** Bind mount
@@ -173,17 +173,17 @@ The Docker container requires several volume mounts for proper operation:
 
 ### Build locally:
 ```bash
-docker build -t herpiko/tg-cc:latest .
+docker build -t herpiko/tgcc:latest .
 ```
 
 ### Build with specific tag:
 ```bash
-docker build -t herpiko/tg-cc:v1.0.0 .
+docker build -t herpiko/tgcc:v1.0.0 .
 ```
 
 ### Build with no cache:
 ```bash
-docker build --no-cache -t herpiko/tg-cc:latest .
+docker build --no-cache -t herpiko/tgcc:latest .
 ```
 
 ## Pushing to Docker Hub
@@ -195,18 +195,18 @@ docker build --no-cache -t herpiko/tg-cc:latest .
 
 2. **Build the image:**
    ```bash
-   docker build -t herpiko/tg-cc:latest .
+   docker build -t herpiko/tgcc:latest .
    ```
 
 3. **Tag the image (if needed):**
    ```bash
-   docker tag herpiko/tg-cc:latest herpiko/tg-cc:v1.0.0
+   docker tag herpiko/tgcc:latest herpiko/tgcc:v1.0.0
    ```
 
 4. **Push to Docker Hub:**
    ```bash
-   docker push herpiko/tg-cc:latest
-   docker push herpiko/tg-cc:v1.0.0
+   docker push herpiko/tgcc:latest
+   docker push herpiko/tgcc:v1.0.0
    ```
 
 ## Makefile Commands
@@ -303,16 +303,16 @@ docker-compose down -v
 **Run the container:**
 ```bash
 docker run -d \
-  --name tg-cc-bot \
+  --name tgcc-bot \
   --restart unless-stopped \
   -e TELEGRAM_BOT_TOKEN="your_token_here" \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
   -v ~/.ssh:/root/.ssh:ro \
   -v ~/.config/claude:/root/.config/claude:ro \
   -v ~/.gitconfig:/root/.gitconfig:ro \
-  -v tg-cc-workspace:/workspace \
-  -v /tmp/tg-cc:/tmp \
-  herpiko/tg-cc:latest \
+  -v tgcc-workspace:/workspace \
+  -v /tmp/tgcc:/tmp \
+  herpiko/tgcc:latest \
   --api-token YOUR_TELEGRAM_BOT_TOKEN
 ```
 
@@ -360,7 +360,7 @@ projects:
 ### Container won't start
 **Check logs:**
 ```bash
-docker-compose logs tg-cc
+docker-compose logs tgcc
 ```
 
 **Common issues:**
@@ -376,14 +376,14 @@ docker-compose logs tg-cc
 
 **Check bot logs:**
 ```bash
-docker-compose logs -f tg-cc
+docker-compose logs -f tgcc
 ```
 
 ### Git clone fails
 **SSH key issues:**
 - Ensure SSH keys are mounted correctly
 - Verify SSH keys have correct permissions (600 for private key)
-- Test SSH connection: `docker-compose exec tg-cc ssh -T git@gitlab.com`
+- Test SSH connection: `docker-compose exec tgcc ssh -T git@gitlab.com`
 
 **Fix SSH permissions:**
 ```bash
@@ -394,12 +394,12 @@ chmod 644 ~/.ssh/id_rsa.pub
 ### Claude Code CLI not working
 **Check Claude configuration:**
 ```bash
-docker-compose exec tg-cc claude --version
+docker-compose exec tgcc claude --version
 ```
 
 **Verify Claude config is mounted:**
 ```bash
-docker-compose exec tg-cc ls -la /root/.config/claude
+docker-compose exec tgcc ls -la /root/.config/claude
 ```
 
 ### Out of disk space
@@ -416,7 +416,7 @@ docker system prune -a
 **Check workspace volume size:**
 ```bash
 docker volume ls
-docker volume inspect tg-cc_workspace
+docker volume inspect tgcc_workspace
 ```
 
 ## Security Considerations
@@ -444,7 +444,7 @@ docker volume inspect tg-cc_workspace
 
 ### View real-time logs:
 ```bash
-docker-compose logs -f tg-cc
+docker-compose logs -f tgcc
 ```
 
 ### Check container status:
@@ -454,12 +454,12 @@ docker-compose ps
 
 ### Inspect container:
 ```bash
-docker-compose exec tg-cc /bin/bash
+docker-compose exec tgcc /bin/bash
 ```
 
 ### Monitor resource usage:
 ```bash
-docker stats tg-cc-bot
+docker stats tgcc-bot
 ```
 
 ## Backup and Recovery
@@ -467,7 +467,7 @@ docker stats tg-cc-bot
 ### Backup workspace volume:
 ```bash
 docker run --rm \
-  -v tg-cc_workspace:/workspace \
+  -v tgcc_workspace:/workspace \
   -v $(pwd):/backup \
   alpine tar czf /backup/workspace-backup.tar.gz -C /workspace .
 ```
@@ -475,7 +475,7 @@ docker run --rm \
 ### Restore workspace volume:
 ```bash
 docker run --rm \
-  -v tg-cc_workspace:/workspace \
+  -v tgcc_workspace:/workspace \
   -v $(pwd):/backup \
   alpine tar xzf /backup/workspace-backup.tar.gz -C /workspace
 ```

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (`tg-cc`) that integrates Claude AI to perform software development tasks through chat commands. The bot uses the Claude Code Agent SDK (`claude-agent-sdk`) with `bypassPermissions` mode to perform complex development operations on configured projects.
+This is a Telegram bot (`tgcc`) that integrates Claude AI to perform software development tasks through chat commands. The bot uses the Claude Code Agent SDK (`claude-agent-sdk`) with `bypassPermissions` mode to perform complex development operations on configured projects.
 
 **Security Notice**: This bot MUST run in an isolated environment (VM, container, or dedicated machine). It has full file system access and executes arbitrary commands via Claude.
 
@@ -12,7 +12,7 @@ This is a Telegram bot (`tg-cc`) that integrates Claude AI to perform software d
 
 Start the bot:
 ```bash
-./tg-cc --tg-api-token YOUR_TELEGRAM_BOT_TOKEN
+./tgcc --tg-api-token YOUR_TELEGRAM_BOT_TOKEN
 ```
 
 The bot requires:
@@ -164,7 +164,7 @@ projects:
 
 ## File Structure
 
-- `tg-cc`: Main executable (Python script with shebang)
+- `tgcc`: Main executable (Python script with shebang)
 - `projects.yaml` or `config.yaml`: Configuration file
 - `requirements.txt`: Python dependencies
 - `README.md`: Documentation with security warnings

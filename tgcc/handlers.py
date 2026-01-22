@@ -1,4 +1,4 @@
-"""Telegram command handlers for tg-cc bot."""
+"""Telegram command handlers for tgcc bot."""
 
 import logging
 import os
@@ -854,7 +854,7 @@ async def cmd_selfupdate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Get the bot's installation directory
     bot_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config_path = os.path.join(bot_dir, "config.yaml")
-    config_backup_path = os.path.join("/tmp", "tg_cc_config_backup.yaml")
+    config_backup_path = os.path.join("/tmp", "tgcc_config_backup.yaml")
 
     # Get current commit
     current_commit_result = subprocess.run(
@@ -938,7 +938,7 @@ async def cmd_selfupdate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await asyncio.sleep(1)
 
         # Restart the process
-        os.execv(sys.executable, [sys.executable, "-m", "tg_cc"] + sys.argv[1:])
+        os.execv(sys.executable, [sys.executable, "-m", "tgcc"] + sys.argv[1:])
 
     except subprocess.TimeoutExpired:
         await reply(update, "Update timed out")

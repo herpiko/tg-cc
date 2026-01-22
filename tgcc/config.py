@@ -1,4 +1,4 @@
-"""Configuration management for tg-cc bot."""
+"""Configuration management for tgcc bot."""
 
 import logging
 import os
