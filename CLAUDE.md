@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot (`tgcc`) that integrates Claude AI to perform software development tasks through chat commands. The bot uses the Claude Code Agent SDK (`claude-agent-sdk`) with `bypassPermissions` mode to perform complex development operations on configured projects.
+This is a chat bot (`ccc`) that integrates Claude AI to perform software development tasks through chat commands. The bot supports both **Telegram** and **Lark** (Feishu) platforms. It uses the Claude Code Agent SDK (`claude-agent-sdk`) with `bypassPermissions` mode to perform complex development operations on configured projects.
 
 **Security Notice**: This bot MUST run in an isolated environment (VM, container, or dedicated machine). It has full file system access and executes arbitrary commands via Claude.
 
@@ -12,33 +12,66 @@ This is a Telegram bot (`tgcc`) that integrates Claude AI to perform software de
 
 Start the bot:
 ```bash
-./tgcc --tg-api-token YOUR_TELEGRAM_BOT_TOKEN
+# Run both Telegram and Lark bots (if configured)
+ccc -c config.yaml
+
+# Run Telegram bot only
+ccc -c config.yaml --telegram
+
+# Run Lark bot only
+ccc -c config.yaml --lark
+
+# Legacy command (still works)
+tgcc -c config.yaml
 ```
 
 The bot requires:
-- Python 3.8+
+- Python 3.10+
 - Claude Code CLI installed and configured
 - Git (for repository cloning)
 - Network access and credentials (Claude Code, SSH for git, `glab` for GitLab)
 
 ## Configuration
 
-All configuration is in `projects.yaml` (or `config.yaml`):
+All configuration is in `config.yaml`:
 
 ```yaml
-authorized_users: ["username"]       # Telegram usernames
-authorized_groups: ["-1234567890"]   # Chat IDs (negative for groups)
+# Shared configuration
+authorized_users: ["username"]       # Usernames (shared across platforms)
 ask_rules: |                         # System prompt for /ask
 feat_rules: |                        # System prompt for /feat
 fix_rules: |                         # System prompt for /fix
 feedback_rules: |                    # System prompt for /feedback
+
+# Telegram configuration
+telegram:
+  bot_token: "your_telegram_bot_token"
+  authorized_groups:
+    - group: "-1234567890"
+      sub: "12345"  # Optional: thread_id for topic/subgroup
+
+# Lark configuration
+lark:
+  app_id: "cli_xxx"
+  app_secret: "xxx"
+  verification_token: "xxx"
+  encrypt_key: ""  # Optional, for encrypted events
+  webhook_port: 8080
+  authorized_users: ["ou_xxx"]  # Lark user open_ids
+  authorized_chats: ["oc_xxx"]  # Lark chat_ids
+
+# Project configuration
 projects:
   - project_name: "name"
     project_repo: "git@gitlab.com:user/repo.git"
     project_workdir: "/path/to/workdir"
+    project_up: "make run"      # Optional: command to start project
+    project_reset: "make purge" # Optional: command to reset project
 ```
 
-**Authorization**: Bot requires BOTH user in `authorized_users` AND chat in `authorized_groups`.
+**Authorization**:
+- Telegram: Requires BOTH user in `authorized_users` AND chat in `telegram.authorized_groups`
+- Lark: Requires BOTH user in `lark.authorized_users` AND chat in `lark.authorized_chats`
 
 **Telegram Privacy Mode**: Must be disabled in @BotFather for group functionality:
 1. Send `/mybots` to @BotFather
@@ -47,46 +80,60 @@ projects:
 
 ## Architecture
 
+### File Structure
+
+```
+ccc/
+├── __init__.py           # Package init, version
+├── __main__.py           # Unified entry point with --telegram/--lark flags
+├── config.py             # Unified configuration loader
+├── claude.py             # Claude SDK operations (platform-agnostic)
+├── git.py                # Git operations (platform-agnostic)
+├── process.py            # Process management (platform-agnostic)
+├── messenger.py          # Abstract messenger interface
+├── telegram/             # Telegram-specific implementation
+│   ├── __init__.py
+│   ├── bot.py            # Telegram application setup
+│   ├── handlers.py       # Telegram command handlers
+│   └── messenger.py      # TelegramMessenger implementation
+└── lark/                 # Lark-specific implementation
+    ├── __init__.py
+    ├── bot.py            # Flask webhook server
+    ├── handlers.py       # Lark command handlers
+    └── messenger.py      # LarkMessenger implementation
+```
+
 ### Core Components
 
-1. **Configuration Loading** (`load_config()`):
-   - Loads projects.yaml at startup
-   - Populates global variables: PROJECTS, AUTHORIZED_USERS, AUTHORIZED_GROUPS, and rule sets
+1. **Messenger Abstraction** (`messenger.py`):
+   - Abstract `Messenger` class defining `reply()` and `get_thread_context()` methods
+   - Platform-specific implementations in `telegram/messenger.py` and `lark/messenger.py`
 
-2. **Authorization** (`is_authorized()`):
-   - Dual authorization: username AND chat_id must both be in allowed lists
-   - Returns False if either check fails
+2. **Configuration Loading** (`config.py`):
+   - Loads config.yaml at startup
+   - Manages shared config (projects, rules) and platform-specific config (Telegram tokens, Lark credentials)
 
-3. **Helper Functions**:
-   - `run_claude_query(prompt, system_prompt, cwd)`: Executes Claude query using SDK with timing tracking
-   - `process_output_file(update, output_file, duration_minutes)`: Reads output file, sends to user, appends execution time, cleans up
-   - `cleanup_output_file(output_file)`: Cleanup utility for error cases
-   - `clone_repository_if_needed(update, project_repo, project_workdir)`: Clones repository if directory doesn't exist
-   - `initialize_claude_md_if_needed(update, project_workdir)`: Checks for CLAUDE.md, runs `claude /init` via SDK if missing
+3. **Core Operations** (platform-agnostic):
+   - `claude.py`: Claude SDK query execution, session management
+   - `git.py`: Repository cloning, branch management
+   - `process.py`: Project spin-up/shutdown, log management
 
-4. **Command Handlers**:
-   - `/ask`: General questions without project context
-   - `/feat`: Implement features in a project
-   - `/fix`: Fix bugs in a project
-   - `/feedback`: Continue work on existing branch
-   - `/init`: Initialize CLAUDE.md for a project
+4. **Platform Implementations**:
+   - `telegram/`: python-telegram-bot based implementation
+   - `lark/`: Flask webhook server with lark-oapi SDK
 
 ### Command Flow (feat/fix/feedback)
 
-1. Authorization check
+1. Authorization check (platform-specific)
 2. Parse project name and user prompt
 3. Find project in PROJECTS list
-4. Clone repository if needed (`clone_repository_if_needed`)
-5. Initialize CLAUDE.md if needed (`initialize_claude_md_if_needed`)
+4. Clone repository if needed
+5. Initialize CLAUDE.md if needed
 6. Generate UUID for this request
 7. Create `/tmp/output_{uuid}.txt` path
 8. Build prompt with project info and output file path
-9. Execute Claude query via SDK with:
-   - `permission_mode='bypassPermissions'`
-   - `system_prompt` with appropriate rules
-   - `cwd` set to project_workdir
-   - `setting_sources=["project"]` to load CLAUDE.md
-10. Read output file and send to user
+9. Execute Claude query via SDK
+10. Read output file and send to user via messenger
 11. Clean up output file
 
 ### Output File Management
@@ -95,23 +142,18 @@ projects:
 - Output files: `/tmp/output_{uuid}.txt`
 - Bot instructs Claude to write results to this file
 - After completion, execution time is appended
-- File is sent to user (truncated at 4000 chars for Telegram limits)
+- File is sent to user (truncated at 4000 chars)
 - File is deleted after sending
-
-### SDK and Subprocess Execution
-
-- Claude queries are executed via the Claude Code Agent SDK (`claude-agent-sdk`)
-- SDK uses `query()` function with `ClaudeAgentOptions` for configuration
-- Git operations use `subprocess.run()` with 30-minute timeout
-- The SDK internally manages the Claude CLI process
 
 ## Command Specifics
 
+### /help
+- Show available commands
+
 ### /ask
-**Format**: `/ask query`
-- Runs in bot's directory (not project-specific)
+**Format**: `/ask project-name query`
+- Ask a question about a project
 - Uses `ask_rules` system prompt
-- For general questions and quick tasks
 
 ### /feat
 **Format**: `/feat project-name task`
@@ -127,30 +169,54 @@ projects:
 - Creates merge request to `main` branch
 - Uses `fix_rules` system prompt
 
+### /plan
+**Format**: `/plan project-name task`
+- Creates new branch (plan-* prefix)
+- For planning and exploration tasks
+- Uses `plan_rules` system prompt
+
 ### /feedback
 **Format**: `/feedback project-name feedback`
 - Continues work on existing branch (does NOT switch branches)
-- For iterative development
+- Maintains session context from previous /feat, /fix, or /plan
 - Uses `feedback_rules` system prompt
 
 ### /init
 **Format**: `/init project-name`
-- Manually initializes CLAUDE.md for a project
+- Initializes CLAUDE.md for a project
 - Clones repository if needed
-- Runs `initialize_claude_md_if_needed()` to generate CLAUDE.md
 - Commits and pushes CLAUDE.md to main branch
-- No other work is performed (useful for setting up new projects)
+- Spins up project if `project_up` is configured
+
+### /up
+**Format**: `/up project-name`
+- Spin up a project using `project_up` command
+
+### /stop
+**Format**: `/stop project-name`
+- Stop a running project
+
+### /status
+- Show running projects
+
+### /cancel
+**Format**: `/cancel [project-name]`
+- Cancel running Claude query
+- Cancels all if no project specified
+
+### /log
+**Format**: `/log project-name [lines]`
+- Show last N lines of project logs (default: 50)
 
 ### /cost
-**Format**: `/cost`
-- Displays Claude API usage costs via claude-monitor
-- Runs `claude-monitor --view realtime` for 3 seconds
-- Captures and returns the cost information
-- No project required (runs in bot's directory)
+- Display Claude API usage costs via claude-monitor
+
+### /selfupdate
+- Update bot from GitHub and restart (Telegram only)
 
 ## Key Behaviors
 
-1. **Branch Management**: feat/fix commands always create new branches with appropriate prefixes. feedback continues existing branch.
+1. **Branch Management**: feat/fix/plan commands create new branches with appropriate prefixes. feedback continues existing branch.
 
 2. **GitLab Integration**: Uses `glab` CLI for merge request creation.
 
@@ -162,19 +228,25 @@ projects:
 
 6. **Codebase Initialization**: If CLAUDE.md doesn't exist in project, runs `claude /init` automatically before executing task.
 
-## File Structure
-
-- `tgcc`: Main executable (Python script with shebang)
-- `projects.yaml` or `config.yaml`: Configuration file
-- `requirements.txt`: Python dependencies
-- `README.md`: Documentation with security warnings
-- `/tmp/output_*.txt`: Temporary output files (auto-cleaned)
+7. **Lark Thread Handling**: Replies are sent to the same thread as the original command.
 
 ## Error Handling
 
-- Authorization failures: Reply with authorized user list
+- Authorization failures: Reply with unauthorized message
 - Missing project: Show available projects
 - Git clone failure: Show error and abort
 - CLAUDE.md initialization failure: Show error and abort
 - SDK query errors: Log and notify user
 - Missing output file: Error message to user
+
+## Dependencies
+
+Core:
+- `python-telegram-bot>=22.0`
+- `PyYAML>=6.0`
+- `claude-agent-sdk>=0.1.0`
+
+Lark support:
+- `lark-oapi>=1.0.0`
+- `flask>=3.0.0`
+- `pycryptodome>=3.0.0` (for encrypted events)

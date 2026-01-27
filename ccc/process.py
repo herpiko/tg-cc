@@ -1,42 +1,44 @@
-"""Process management for tgcc bot."""
+"""Process management for ccc bot."""
 
 import logging
 import os
 import signal
 import subprocess
 from collections import deque
+from typing import Any
 
-from . import config
+from .messenger import Messenger
 
 logger = logging.getLogger(__name__)
-
-
-async def _reply(update, text: str):
-    """Reply to a message, sending to the configured thread if set."""
-    chat_id = str(update.message.chat.id)
-    thread_id = config.get_thread_id(chat_id)
-    await update.message.reply_text(text, message_thread_id=thread_id)
 
 
 # Process storage for running project instances: {project_name: (subprocess.Popen, log_file_path)}
 PROJECT_PROCESSES = {}
 
 
-async def spin_up_project(update, project_name: str, project_workdir: str, project_up: str) -> bool:
-    """Spin up a project using project_up command. Stores the process for later termination."""
+async def spin_up_project(messenger: Messenger, context: Any, project_name: str, project_workdir: str, project_up: str) -> bool:
+    """Spin up a project using project_up command. Stores the process for later termination.
+
+    Args:
+        messenger: Platform-specific messenger for sending replies
+        context: Platform-specific context (Telegram update, Lark message dict, etc.)
+        project_name: Name of the project
+        project_workdir: Working directory for the project
+        project_up: Command to start the project
+    """
     if not project_up:
         logger.info(f"No project_up command configured for {project_name}")
         return True
 
     # Kill existing process if any
-    await kill_project_process(update, project_name, silent=True)
+    await kill_project_process(messenger, context, project_name, silent=True)
 
     try:
-        await _reply(update,f"Spinning up project {project_name}...")
+        await messenger.reply(context, f"Spinning up project {project_name}...")
         logger.info(f"Running project_up command for {project_name}: {project_up}")
 
         # Create log file for output
-        log_file_path = f"/tmp/tgcc_{project_name}.log"
+        log_file_path = f"/tmp/ccc_{project_name}.log"
         log_file = open(log_file_path, 'w')
 
         # Run the command in background using Popen, redirect output to log file
@@ -51,21 +53,28 @@ async def spin_up_project(update, project_name: str, project_workdir: str, proje
 
         PROJECT_PROCESSES[project_name] = (process, log_file_path, log_file)
         logger.info(f"Started process {process.pid} for project {project_name}, logging to {log_file_path}")
-        await _reply(update,f"Project {project_name} started (PID: {process.pid})")
+        await messenger.reply(context, f"Project {project_name} started (PID: {process.pid})")
         return True
 
     except Exception as e:
         logger.error(f"Error spinning up project {project_name}: {e}")
-        await _reply(update,f"Error spinning up project: {str(e)}")
+        await messenger.reply(context, f"Error spinning up project: {str(e)}")
         return False
 
 
-async def kill_project_process(update, project_name: str, silent: bool = False) -> bool:
-    """Kill a running project process."""
+async def kill_project_process(messenger: Messenger, context: Any, project_name: str, silent: bool = False) -> bool:
+    """Kill a running project process.
+
+    Args:
+        messenger: Platform-specific messenger for sending replies
+        context: Platform-specific context (Telegram update, Lark message dict, etc.)
+        project_name: Name of the project
+        silent: If True, don't send messages about the operation
+    """
     process_info = PROJECT_PROCESSES.get(project_name)
     if not process_info:
         if not silent:
-            await _reply(update,f"No running process found for project {project_name}")
+            await messenger.reply(context, f"No running process found for project {project_name}")
         return False
 
     process, log_file_path, log_file = process_info
@@ -76,19 +85,19 @@ async def kill_project_process(update, project_name: str, silent: bool = False) 
         process.wait(timeout=5)
         logger.info(f"Killed process {process.pid} for project {project_name}")
         if not silent:
-            await _reply(update,f"Stopped project {project_name} (PID: {process.pid})")
+            await messenger.reply(context, f"Stopped project {project_name} (PID: {process.pid})")
     except subprocess.TimeoutExpired:
         # Force kill if SIGTERM didn't work
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         logger.info(f"Force killed process {process.pid} for project {project_name}")
         if not silent:
-            await _reply(update,f"Force stopped project {project_name} (PID: {process.pid})")
+            await messenger.reply(context, f"Force stopped project {project_name} (PID: {process.pid})")
     except ProcessLookupError:
         logger.info(f"Process {process.pid} for project {project_name} already terminated")
     except Exception as e:
         logger.error(f"Error killing process for {project_name}: {e}")
         if not silent:
-            await _reply(update,f"Error stopping project: {str(e)}")
+            await messenger.reply(context, f"Error stopping project: {str(e)}")
         return False
 
     # Close log file

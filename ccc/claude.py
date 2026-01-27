@@ -1,10 +1,11 @@
-"""Claude SDK operations for tgcc bot."""
+"""Claude SDK operations for ccc bot."""
 
 import asyncio
 import logging
 import os
 import subprocess
 from datetime import datetime
+from typing import Any
 
 from claude_agent_sdk import (
     query,
@@ -17,16 +18,9 @@ from claude_agent_sdk import (
     ToolResultBlock
 )
 
-from . import config
+from .messenger import Messenger
 
 logger = logging.getLogger(__name__)
-
-
-async def _reply(update, text: str):
-    """Reply to a message, sending to the configured thread if set."""
-    chat_id = str(update.message.chat.id)
-    thread_id = config.get_thread_id(chat_id)
-    await update.message.reply_text(text, message_thread_id=thread_id)
 
 
 # Session storage for conversation continuity: {project_name: session_id}
@@ -114,15 +108,21 @@ def get_all_running_queries() -> dict:
     return {k: v for k, v in RUNNING_QUERIES.items() if not v.done()}
 
 
-async def initialize_claude_md(update, project_workdir: str) -> bool:
-    """Check if CLAUDE.md exists, if not run claude /init to create it, then commit and push."""
+async def initialize_claude_md(messenger: Messenger, context: Any, project_workdir: str) -> bool:
+    """Check if CLAUDE.md exists, if not run claude /init to create it, then commit and push.
+
+    Args:
+        messenger: Platform-specific messenger for sending replies
+        context: Platform-specific context (Telegram update, Lark message dict, etc.)
+        project_workdir: Working directory for the project
+    """
     claude_md_path = os.path.join(project_workdir, "CLAUDE.md")
 
     if os.path.exists(claude_md_path):
         logger.info(f"CLAUDE.md already exists in {project_workdir}")
         return True
 
-    await _reply(update,"CLAUDE.md not found. Preparing to initialize codebase...")
+    await messenger.reply(context, "CLAUDE.md not found. Preparing to initialize codebase...")
     logger.info(f"Preparing to run claude /init in {project_workdir}")
 
     try:
@@ -139,7 +139,7 @@ async def initialize_claude_md(update, project_workdir: str) -> bool:
 
         if reset_result.returncode != 0:
             logger.error(f"git reset failed: {reset_result.stderr}")
-            await _reply(update,f"Warning: Could not clean branch:\n{reset_result.stderr[:500]}")
+            await messenger.reply(context, f"Warning: Could not clean branch:\n{reset_result.stderr[:500]}")
 
         # Clean untracked files
         clean_result = subprocess.run(
@@ -166,7 +166,7 @@ async def initialize_claude_md(update, project_workdir: str) -> bool:
 
         if checkout_result.returncode != 0:
             logger.error(f"git checkout main failed: {checkout_result.stderr}")
-            await _reply(update,f"Warning: Could not checkout main:\n{checkout_result.stderr[:500]}")
+            await messenger.reply(context, f"Warning: Could not checkout main:\n{checkout_result.stderr[:500]}")
 
         # Pull latest from main
         logger.info("Pulling from origin/main")
@@ -181,10 +181,10 @@ async def initialize_claude_md(update, project_workdir: str) -> bool:
 
         if pull_result.returncode != 0:
             logger.error(f"git pull failed: {pull_result.stderr}")
-            await _reply(update,f"Warning: Could not pull from main:\n{pull_result.stderr[:500]}")
+            await messenger.reply(context, f"Warning: Could not pull from main:\n{pull_result.stderr[:500]}")
 
         # Now run claude /init using SDK
-        await _reply(update,"Running claude /init to generate CLAUDE.md...")
+        await messenger.reply(context, "Running claude /init to generate CLAUDE.md...")
         logger.info(f"Running claude /init in {project_workdir}")
 
         try:
@@ -202,15 +202,15 @@ async def initialize_claude_md(update, project_workdir: str) -> bool:
                         logger.error(f"claude /init failed: {init_error}")
 
             if init_error:
-                await _reply(update,f"Failed to initialize CLAUDE.md:\n{init_error[:500] if init_error else 'Unknown error'}")
+                await messenger.reply(context, f"Failed to initialize CLAUDE.md:\n{init_error[:500] if init_error else 'Unknown error'}")
                 return False
 
         except Exception as e:
             logger.error(f"claude /init failed: {e}")
-            await _reply(update,f"Failed to initialize CLAUDE.md:\n{str(e)[:500]}")
+            await messenger.reply(context, f"Failed to initialize CLAUDE.md:\n{str(e)[:500]}")
             return False
 
-        await _reply(update,"CLAUDE.md initialized successfully! Committing and pushing to main branch...")
+        await messenger.reply(context, "CLAUDE.md initialized successfully! Committing and pushing to main branch...")
         logger.info(f"Successfully initialized CLAUDE.md in {project_workdir}")
 
         # Commit and push CLAUDE.md to main
@@ -226,7 +226,7 @@ async def initialize_claude_md(update, project_workdir: str) -> bool:
 
             if add_result.returncode != 0:
                 logger.error(f"git add failed: {add_result.stderr}")
-                await _reply(update,f"Warning: Could not add CLAUDE.md to git:\n{add_result.stderr[:500]}")
+                await messenger.reply(context, f"Warning: Could not add CLAUDE.md to git:\n{add_result.stderr[:500]}")
                 return True  # Still return True as initialization succeeded
 
             # Commit CLAUDE.md
@@ -246,7 +246,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"""
 
             if commit_result.returncode != 0:
                 logger.error(f"git commit failed: {commit_result.stderr}")
-                await _reply(update,f"Warning: Could not commit CLAUDE.md:\n{commit_result.stderr[:500]}")
+                await messenger.reply(context, f"Warning: Could not commit CLAUDE.md:\n{commit_result.stderr[:500]}")
                 return True  # Still return True as initialization succeeded
 
             # Push to main branch
@@ -260,28 +260,28 @@ Co-Authored-By: Claude <noreply@anthropic.com>"""
 
             if push_result.returncode != 0:
                 logger.error(f"git push failed: {push_result.stderr}")
-                await _reply(update,f"Warning: Could not push CLAUDE.md to main:\n{push_result.stderr[:500]}")
+                await messenger.reply(context, f"Warning: Could not push CLAUDE.md to main:\n{push_result.stderr[:500]}")
                 return True  # Still return True as initialization succeeded
 
-            await _reply(update,"CLAUDE.md committed and pushed to main successfully!")
+            await messenger.reply(context, "CLAUDE.md committed and pushed to main successfully!")
             logger.info(f"Successfully committed and pushed CLAUDE.md to main in {project_workdir}")
 
         except subprocess.TimeoutExpired:
-            await _reply(update,"Warning: Git operation timed out")
+            await messenger.reply(context, "Warning: Git operation timed out")
             return True  # Still return True as initialization succeeded
         except Exception as e:
             logger.error(f"Error committing/pushing CLAUDE.md: {e}")
-            await _reply(update,f"Warning: Error with git operations: {str(e)}")
+            await messenger.reply(context, f"Warning: Error with git operations: {str(e)}")
             return True  # Still return True as initialization succeeded
 
         return True
 
     except subprocess.TimeoutExpired:
-        await _reply(update,"Git operation timed out during CLAUDE.md initialization")
+        await messenger.reply(context, "Git operation timed out during CLAUDE.md initialization")
         return False
     except Exception as e:
         logger.error(f"Error initializing CLAUDE.md: {e}")
-        await _reply(update,f"Error initializing CLAUDE.md: {str(e)}")
+        await messenger.reply(context, f"Error initializing CLAUDE.md: {str(e)}")
         return False
 
 

@@ -1,4 +1,4 @@
-"""Main bot application for tgcc."""
+"""Telegram bot application for ccc."""
 
 import asyncio
 import logging
@@ -8,28 +8,36 @@ import signal
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters
 
-from . import config
-from . import handlers
+from ccc import config
+from ccc.telegram import handlers
+from ccc.telegram.messenger import TelegramMessenger
 
 # Ensure ~/.local/bin is in PATH for commands like claude-monitor
 user_local_bin = os.path.expanduser("~/.local/bin")
 if user_local_bin not in os.environ.get("PATH", ""):
     os.environ["PATH"] = f"{user_local_bin}:{os.environ.get('PATH', '')}"
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
 logger = logging.getLogger(__name__)
+
+# Global messenger instance
+messenger = None
+
+
+def get_messenger() -> TelegramMessenger:
+    """Get the global TelegramMessenger instance."""
+    global messenger
+    if messenger is None:
+        messenger = TelegramMessenger()
+    return messenger
 
 
 async def send_startup_messages(application: Application) -> None:
     """Send startup notification to all authorized groups."""
     logger.info("Sending startup notifications to authorized groups...")
 
-    for group_id in config.get_authorized_group_ids():
+    for group_id in config.get_telegram_authorized_group_ids():
         try:
-            thread_id = config.get_thread_id(group_id)
+            thread_id = config.get_telegram_thread_id(group_id)
             await application.bot.send_message(
                 chat_id=group_id,
                 text="Agent is now online and ready to receive commands.",
@@ -45,9 +53,9 @@ async def send_shutdown_messages(application: Application) -> None:
     """Send shutdown notification to all authorized groups."""
     logger.info("Sending shutdown notifications to authorized groups...")
 
-    for group_id in config.get_authorized_group_ids():
+    for group_id in config.get_telegram_authorized_group_ids():
         try:
-            thread_id = config.get_thread_id(group_id)
+            thread_id = config.get_telegram_thread_id(group_id)
             await application.bot.send_message(
                 chat_id=group_id,
                 text="Agent is going offline.",
@@ -61,7 +69,8 @@ async def send_shutdown_messages(application: Application) -> None:
 
 def run(config_path: str = None):
     """Run the Telegram bot."""
-    config.load_config(config_path)
+    if config_path:
+        config.load_config(config_path)
 
     if not config.TELEGRAM_BOT_TOKEN:
         logger.error('telegram_bot_token not set in config.yaml')
@@ -91,7 +100,7 @@ def run(config_path: str = None):
         handlers.handle_message
     ))
 
-    logger.info("Agent is starting...")
+    logger.info("Telegram bot is starting...")
     logger.info("Listening for messages and commands...")
 
     # Run with custom signal handling to send shutdown messages

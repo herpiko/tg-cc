@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tgcc"
-version = "0.1.0"
-description = "Telegram bot that integrates Claude AI for software development tasks"
+name = "ccc"
+version = "0.2.0"
+description = "Claude Code Chat Bot for Telegram and Lark"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Herpiko Dwi Aguno"}
 ]
-keywords = ["telegram", "bot", "claude", "ai", "development"]
+keywords = ["telegram", "lark", "bot", "claude", "ai", "development"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -30,6 +30,9 @@ dependencies = [
     "python-telegram-bot>=22.0",
     "PyYAML>=6.0",
     "claude-agent-sdk>=0.1.0",
+    "lark-oapi>=1.0.0",
+    "flask>=3.0.0",
+    "pycryptodome>=3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -39,9 +42,18 @@ dev = [
     "isort>=5.0",
     "mypy>=1.0",
 ]
+telegram = [
+    "python-telegram-bot>=22.0",
+]
+lark = [
+    "lark-oapi>=1.0.0",
+    "flask>=3.0.0",
+    "pycryptodome>=3.0.0",
+]
 
 [project.scripts]
-tgcc = "tgcc.__main__:main"
+ccc = "ccc.__main__:main"
+tgcc = "ccc.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/herpiko/tg-cc"
@@ -49,7 +61,7 @@ Repository = "https://github.com/herpiko/tg-cc"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tgcc*"]
+include = ["ccc*"]
 
 [tool.black]
 line-length = 100

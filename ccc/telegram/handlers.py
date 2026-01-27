@@ -1,4 +1,4 @@
-"""Telegram command handlers for tgcc bot."""
+"""Telegram command handlers for ccc bot."""
 
 import logging
 import os
@@ -8,12 +8,24 @@ import uuid
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from . import config
-from . import claude
-from . import git
-from . import process
+from ccc import config
+from ccc import claude
+from ccc import git
+from ccc import process
+from ccc.telegram.messenger import TelegramMessenger
 
 logger = logging.getLogger(__name__)
+
+# Global messenger instance
+_messenger = None
+
+
+def get_messenger() -> TelegramMessenger:
+    """Get or create the global TelegramMessenger instance."""
+    global _messenger
+    if _messenger is None:
+        _messenger = TelegramMessenger()
+    return _messenger
 
 
 def is_authorized(update: Update) -> bool:
@@ -27,16 +39,15 @@ def is_authorized(update: Update) -> bool:
     logger.info(f"Checking authorization for user: {username}, chat_id: {chat_id}")
 
     user_authorized = username in config.AUTHORIZED_USERS
-    group_authorized = config.is_group_authorized(chat_id)
+    group_authorized = config.is_telegram_group_authorized(chat_id)
 
     return user_authorized and group_authorized
 
 
 async def reply(update: Update, text: str):
-    """Reply to a message, sending to the configured thread if set."""
-    chat_id = str(update.message.chat.id)
-    thread_id = config.get_thread_id(chat_id)
-    await update.message.reply_text(text, message_thread_id=thread_id)
+    """Reply to a message using the messenger."""
+    messenger = get_messenger()
+    await messenger.reply(update, text)
 
 
 async def process_output_file(update, output_file: str, duration_minutes: float):
@@ -129,6 +140,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /ask command. Format: /ask project-name query"""
+    messenger = get_messenger()
+
     if not update.message:
         logger.info("Received /ask command with no message object")
         return
@@ -156,10 +169,10 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
-    if not await git.clone_repository_if_needed(update, project_repo, project_workdir):
+    if not await git.clone_repository_if_needed(messenger, update, project_repo, project_workdir):
         return
 
-    if not await claude.initialize_claude_md(update, project_workdir):
+    if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
     await reply(update, f"Processing for project: {project_name}...")
@@ -189,6 +202,8 @@ Write the output in {output_file}"""
 
 async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /feat command. Format: /feat project-name prompt"""
+    messenger = get_messenger()
+
     if not update.message:
         logger.info("Received /feat command with no message object")
         return
@@ -216,13 +231,13 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
-    if not await git.clone_repository_if_needed(update, project_repo, project_workdir):
+    if not await git.clone_repository_if_needed(messenger, update, project_repo, project_workdir):
         return
 
-    if not await claude.initialize_claude_md(update, project_workdir):
+    if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
-    if not await git.refresh_to_main_branch(update, project_workdir):
+    if not await git.refresh_to_main_branch(messenger, update, project_workdir):
         return
 
     # Clear existing session for this project (starting fresh)
@@ -259,6 +274,8 @@ Write the output in {output_file}"""
 
 async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /fix command. Format: /fix project-name prompt"""
+    messenger = get_messenger()
+
     if not update.message:
         logger.info("Received /fix command with no message object")
         return
@@ -286,15 +303,15 @@ async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
-    if not await git.clone_repository_if_needed(update, project_repo, project_workdir):
+    if not await git.clone_repository_if_needed(messenger, update, project_repo, project_workdir):
         return
 
-    if not await claude.initialize_claude_md(update, project_workdir):
+    if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
     await reply(update, f"Processing for project: {project_name}...")
 
-    if not await git.refresh_to_main_branch(update, project_workdir):
+    if not await git.refresh_to_main_branch(messenger, update, project_workdir):
         return
 
     # Clear existing session for this project (starting fresh)
@@ -329,6 +346,8 @@ Write the output in {output_file}"""
 
 async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /plan command. Format: /plan project-name prompt"""
+    messenger = get_messenger()
+
     if not update.message:
         logger.info("Received /plan command with no message object")
         return
@@ -356,13 +375,13 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
-    if not await git.clone_repository_if_needed(update, project_repo, project_workdir):
+    if not await git.clone_repository_if_needed(messenger, update, project_repo, project_workdir):
         return
 
-    if not await claude.initialize_claude_md(update, project_workdir):
+    if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
-    if not await git.refresh_to_main_branch(update, project_workdir):
+    if not await git.refresh_to_main_branch(messenger, update, project_workdir):
         return
 
     # Clear existing session for this project (starting fresh)
@@ -399,6 +418,8 @@ Write the output in {output_file}"""
 
 async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /feedback command. Format: /feedback project-name prompt"""
+    messenger = get_messenger()
+
     if not update.message:
         logger.info("Received /feedback command with no message object")
         return
@@ -426,10 +447,10 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
-    if not await git.clone_repository_if_needed(update, project_repo, project_workdir):
+    if not await git.clone_repository_if_needed(messenger, update, project_repo, project_workdir):
         return
 
-    if not await claude.initialize_claude_md(update, project_workdir):
+    if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
     # Get existing session for this project (to continue conversation)
@@ -470,6 +491,8 @@ Write the output in {output_file}"""
 
 async def cmd_init(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /init command. Format: /init project-name"""
+    messenger = get_messenger()
+
     if not update.message:
         logger.info("Received /init command with no message object")
         return
@@ -497,14 +520,14 @@ async def cmd_init(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     project_workdir = project['project_workdir']
     project_up = project.get('project_up')
 
-    if not await git.clone_repository_if_needed(update, project_repo, project_workdir):
+    if not await git.clone_repository_if_needed(messenger, update, project_repo, project_workdir):
         return
 
-    init_success = await claude.initialize_claude_md(update, project_workdir)
+    init_success = await claude.initialize_claude_md(messenger, update, project_workdir)
 
     # Spin up the project regardless of CLAUDE.md initialization result
     if project_up:
-        await process.spin_up_project(update, project_name, project_workdir, project_up)
+        await process.spin_up_project(messenger, update, project_name, project_workdir, project_up)
 
     if not init_success:
         await reply(update, f"Failed to initialize CLAUDE.md for project: {project_name}")
@@ -515,6 +538,8 @@ async def cmd_init(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /up command. Format: /up project-name"""
+    messenger = get_messenger()
+
     if not update.message:
         logger.info("Received /up command with no message object")
         return
@@ -545,11 +570,13 @@ async def cmd_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, f"No project_up command configured for {project_name}")
         return
 
-    await process.spin_up_project(update, project_name, project_workdir, project_up)
+    await process.spin_up_project(messenger, update, project_name, project_workdir, project_up)
 
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stop command. Format: /stop project-name"""
+    messenger = get_messenger()
+
     if not update.message:
         logger.info("Received /stop command with no message object")
         return
@@ -573,7 +600,7 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
-    await process.kill_project_process(update, project_name)
+    await process.kill_project_process(messenger, update, project_name)
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -753,7 +780,7 @@ async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 Please edit the {log_file}, just take the Summary, remove everything else. Also remove the ASCII lines and make it chat message friendly.
 """
 
-        project_workdir = os.path.dirname(os.path.dirname(__file__))
+        project_workdir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         _, _ = await claude.run_claude_query(prompt, config.ASK_RULES, project_workdir)
 
         # Read the log file instead of stdout
@@ -852,9 +879,9 @@ async def cmd_selfupdate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     logger.info("Received /selfupdate command")
 
     # Get the bot's installation directory
-    bot_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bot_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     config_path = os.path.join(bot_dir, "config.yaml")
-    config_backup_path = os.path.join("/tmp", "tgcc_config_backup.yaml")
+    config_backup_path = os.path.join("/tmp", "ccc_config_backup.yaml")
 
     # Get current commit
     current_commit_result = subprocess.run(
@@ -938,7 +965,7 @@ async def cmd_selfupdate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await asyncio.sleep(1)
 
         # Restart the process
-        os.execv(sys.executable, [sys.executable, "-m", "tgcc"] + sys.argv[1:])
+        os.execv(sys.executable, [sys.executable, "-m", "ccc"] + sys.argv[1:])
 
     except subprocess.TimeoutExpired:
         await reply(update, "Update timed out")

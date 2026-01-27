@@ -1,10 +1,6 @@
-telegram_bot_token: foobar
+# Shared configuration
 authorized_users:
   - "herpiko"
-
-authorized_groups:
-  - group: "-9999"
-    sub: "9999"  # Optional: thread_id for topic/subgroup
 
 general_rules: |
   - Avoid using too much emojis.
@@ -99,9 +95,27 @@ feedback_rules: |
     - Create merge request. Target branch should be `main` except if stated otherwise.
   - Write very short summary of your work into the output.txt, alongside with the merge request link (if any).
 
+# Telegram configuration
+telegram:
+  bot_token: "your_telegram_bot_token"
+  authorized_groups:
+    - group: "-1234567890"
+      sub: "12345"  # Optional: thread_id for topic/subgroup
+
+# Lark configuration
+lark:
+  app_id: "cli_xxx"
+  app_secret: "xxx"
+  verification_token: "xxx"
+  encrypt_key: ""  # Optional, for encrypted events
+  webhook_port: 8080
+  authorized_users: ["ou_xxx"]  # Lark user open_ids
+  authorized_chats: ["oc_xxx"]  # Lark chat_ids
+
+# Project configuration
 projects:
-  - project_name: "sdk-be"
-    project_repo: "git@gitlab.com:foo/bar.git"
-    project_workdir: "/home/herpiko/src/bar-by-agent"
-    project_up: "make run"
-    project_reset: "make purge"
+  - project_name: "my-project"
+    project_repo: "git@gitlab.com:user/repo.git"
+    project_workdir: "/path/to/workdir"
+    project_up: "make run"      # Optional: command to start project
+    project_reset: "make purge" # Optional: command to reset project
