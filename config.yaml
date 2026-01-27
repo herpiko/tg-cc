@@ -2,6 +2,10 @@
 authorized_users:
   - "herpiko"
 
+# Base directory for git worktrees (isolated workspaces for concurrent queries)
+# Default: /tmp/ccc-worktrees
+worktree_base: /tmp/ccc-worktrees
+
 general_rules: |
   - Avoid using too much emojis.
   - Be clear and concise in your responses.

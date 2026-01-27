@@ -6,12 +6,10 @@ import shutil
 import subprocess
 from typing import Any, Optional
 
+from . import config
 from .messenger import Messenger
 
 logger = logging.getLogger(__name__)
-
-# Base path for worktrees
-WORKTREE_BASE = "/tmp/ccc-worktrees"
 
 
 async def clone_repository_if_needed(messenger: Messenger, context: Any, project_repo: str, project_workdir: str) -> bool:
@@ -144,7 +142,7 @@ def get_worktree_path(project_name: str, query_id: str) -> str:
     Returns:
         Path to the worktree directory
     """
-    return os.path.join(WORKTREE_BASE, project_name, query_id)
+    return os.path.join(config.WORKTREE_BASE, project_name, query_id)
 
 
 async def create_worktree(messenger: Messenger, context: Any, project_workdir: str, project_name: str, query_id: str) -> Optional[str]:
@@ -269,7 +267,7 @@ def cleanup_all_project_worktrees(project_workdir: str, project_name: str) -> in
     Returns:
         Number of worktrees cleaned up
     """
-    project_worktree_base = os.path.join(WORKTREE_BASE, project_name)
+    project_worktree_base = os.path.join(config.WORKTREE_BASE, project_name)
     if not os.path.exists(project_worktree_base):
         return 0
 

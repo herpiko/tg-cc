@@ -15,6 +15,7 @@ FIX_RULES = ""
 PLAN_RULES = ""
 FEEDBACK_RULES = ""
 GENERAL_RULES = ""
+WORKTREE_BASE = "/tmp/ccc-worktrees"  # Base directory for git worktrees
 
 # Telegram-specific configuration
 TELEGRAM_BOT_TOKEN = ""
@@ -34,7 +35,7 @@ def load_config(config_path: str = None):
     """Load configuration from config.yaml"""
     global PROJECTS, AUTHORIZED_USERS, TELEGRAM_AUTHORIZED_GROUPS
     global ASK_RULES, FEAT_RULES, FIX_RULES, PLAN_RULES, FEEDBACK_RULES, GENERAL_RULES
-    global TELEGRAM_BOT_TOKEN
+    global TELEGRAM_BOT_TOKEN, WORKTREE_BASE
     global LARK_APP_ID, LARK_APP_SECRET, LARK_VERIFICATION_TOKEN, LARK_ENCRYPT_KEY
     global LARK_WEBHOOK_PORT, LARK_AUTHORIZED_USERS, LARK_AUTHORIZED_CHATS
 
@@ -55,6 +56,7 @@ def load_config(config_path: str = None):
             FIX_RULES = data.get('fix_rules', '')
             PLAN_RULES = data.get('plan_rules', '')
             FEEDBACK_RULES = data.get('feedback_rules', '')
+            WORKTREE_BASE = data.get('worktree_base', '/tmp/ccc-worktrees')
 
             # Telegram configuration
             telegram_config = data.get('telegram', {})
@@ -88,6 +90,7 @@ def load_config(config_path: str = None):
 
             # Logging
             logger.info(f"Loaded {len(PROJECTS)} projects from {config_path}")
+            logger.info(f"Worktree base: {WORKTREE_BASE}")
             for project in PROJECTS:
                 logger.info(f"  - {project['project_name']}: {project['project_workdir']}")
 
