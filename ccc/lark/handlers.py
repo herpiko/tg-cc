@@ -191,8 +191,9 @@ async def cmd_help(messenger, context: dict, args: list) -> None:
 /plan <project-name> <task>
   Plan and explore a task (creates new branch)
 
-/feedback <project-name> <feedback>
-  Continue work on the current branch with context from previous command
+/feedback <project-name> [job-id] <feedback>
+  Continue work with context from previous command
+  Optional: specify job-id to continue a specific job (see /status)
 
 /init <project-name>
   Initialize CLAUDE.md for a project
@@ -332,7 +333,8 @@ Write the output in {output_file}"""
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.FEAT_RULES, worktree_path,
             project_name=project_name, command="feat", user_prompt=user_prompt,
-            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True  # Keep worktree for potential feedback
         )
         claude.set_session(project_name, session_id)
         await process_output_file(messenger, context, output_file, duration_minutes)
@@ -398,7 +400,8 @@ Write the output in {output_file}"""
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.FIX_RULES, worktree_path,
             project_name=project_name, command="fix", user_prompt=user_prompt,
-            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True  # Keep worktree for potential feedback
         )
         claude.set_session(project_name, session_id)
         await process_output_file(messenger, context, output_file, duration_minutes)
@@ -464,7 +467,8 @@ Write the output in {output_file}"""
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.PLAN_RULES, worktree_path,
             project_name=project_name, command="plan", user_prompt=user_prompt,
-            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True  # Keep worktree for potential feedback
         )
         claude.set_session(project_name, session_id)
         await process_output_file(messenger, context, output_file, duration_minutes)
@@ -480,13 +484,12 @@ Write the output in {output_file}"""
 
 
 async def cmd_feedback(messenger, context: dict, args: list) -> None:
-    """Handle /feedback command. Format: /feedback project-name prompt"""
+    """Handle /feedback command. Format: /feedback project-name [job-id] prompt"""
     if len(args) < 2:
-        await messenger.reply(context, "Usage: /feedback project-name prompt")
+        await messenger.reply(context, "Usage: /feedback project-name [job-id] prompt\n\nUse /status to see available job IDs.")
         return
 
     project_name = args[0]
-    user_prompt = " ".join(args[1:])
 
     project = config.get_project(project_name)
     if not project:
@@ -496,36 +499,73 @@ async def cmd_feedback(messenger, context: dict, args: list) -> None:
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
+    # Check if second argument is a job ID (8 char hex) or part of the prompt
+    job_id = None
+    if len(args) >= 2:
+        potential_job_id = args[1]
+        # Check if it looks like a job ID (8 hex chars) and exists in completed jobs
+        if len(potential_job_id) == 8 and claude.get_completed_job(potential_job_id):
+            job_id = potential_job_id
+            user_prompt = " ".join(args[2:]) if len(args) > 2 else ""
+        else:
+            user_prompt = " ".join(args[1:])
+
+    if not user_prompt:
+        await messenger.reply(context, "Usage: /feedback project-name [job-id] prompt\n\nPlease provide feedback text.")
+        return
+
     if not await git.clone_repository_if_needed(messenger, context, project_repo, project_workdir):
         return
 
     if not await claude.initialize_claude_md(messenger, context, project_workdir):
         return
 
-    # Get existing session for this project
-    existing_session = claude.get_session(project_name)
-
     # Try to use existing thread context, fall back to current context
     stored_context = messenger.get_project_thread(project_name)
     reply_context = stored_context if stored_context else context
 
-    if existing_session:
-        logger.info(f"Resuming session {existing_session} for project {project_name}")
-    else:
-        logger.info(f"No existing session for project {project_name}, starting fresh")
-        messenger.set_thread_context(project_name, context)
-        reply_context = context
+    # Determine worktree and session based on job_id
+    if job_id:
+        # Use existing job's worktree and session
+        job_info = claude.get_completed_job(job_id)
+        if not job_info:
+            await messenger.reply(context, f"Job '{job_id}' not found. Use /status to see available jobs.")
+            return
 
-    # Generate query ID and create worktree
-    query_id = str(uuid.uuid4())[:8]
-    worktree_path = await git.create_worktree(messenger, context, project_workdir, project_name, query_id)
-    if not worktree_path:
-        return
+        if job_info.get("project_name") != project_name:
+            await messenger.reply(context, f"Job '{job_id}' belongs to project '{job_info.get('project_name')}', not '{project_name}'.")
+            return
 
-    if existing_session:
-        await messenger.reply(reply_context, f"Continuing session for project: {project_name} (query: {query_id})...")
+        worktree_path = job_info.get("worktree_path")
+        existing_session = job_info.get("session_id")
+        query_id = job_id  # Reuse the same job ID for continuity
+
+        logger.info(f"Resuming job {job_id} with session {existing_session} in worktree {worktree_path}")
+        await messenger.reply(reply_context, f"Continuing job {job_id} for project: {project_name}...")
+
+        # Remove from completed jobs since we're continuing it
+        del claude.COMPLETED_JOBS[job_id]
     else:
-        await messenger.reply(reply_context, f"No existing session found. Starting new session for project: {project_name} (query: {query_id})...")
+        # Original behavior: use project session and create new worktree
+        existing_session = claude.get_session(project_name)
+
+        if existing_session:
+            logger.info(f"Resuming session {existing_session} for project {project_name}")
+        else:
+            logger.info(f"No existing session for project {project_name}, starting fresh")
+            messenger.set_thread_context(project_name, context)
+            reply_context = context
+
+        # Generate query ID and create worktree
+        query_id = str(uuid.uuid4())[:8]
+        worktree_path = await git.create_worktree(messenger, context, project_workdir, project_name, query_id)
+        if not worktree_path:
+            return
+
+        if existing_session:
+            await messenger.reply(reply_context, f"Continuing session for project: {project_name} (query: {query_id})...")
+        else:
+            await messenger.reply(reply_context, f"No existing session found. Starting new session for project: {project_name} (query: {query_id})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
 
@@ -543,7 +583,8 @@ Write the output in {output_file}"""
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.FEEDBACK_RULES, worktree_path,
             resume=existing_session, project_name=project_name, command="feedback", user_prompt=user_prompt,
-            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True  # Keep for potential further feedback
         )
         claude.set_session(project_name, session_id)
         await process_output_file(messenger, reply_context, output_file, duration_minutes)
@@ -630,7 +671,7 @@ async def cmd_stop(messenger, context: dict, args: list) -> None:
 
 
 async def cmd_status(messenger, context: dict, args: list) -> None:
-    """Handle /status command. Shows running queries and projects."""
+    """Handle /status command. Shows running queries, completed jobs, and processes."""
     from datetime import datetime
     status_lines = []
 
@@ -653,7 +694,28 @@ async def cmd_status(messenger, context: dict, args: list) -> None:
                 status_lines.append(f"  [{query_id}] {project_name} /{cmd}: {prompt} ({elapsed_str})")
 
         status_lines.append("")
-        status_lines.append("Use /cancel <project> to cancel all, or /cancel <project> <id> for specific query")
+        status_lines.append("Use /cancel <project> [id] to cancel queries")
+
+    # Check completed jobs available for feedback
+    completed_jobs = claude.COMPLETED_JOBS
+    if completed_jobs:
+        status_lines.append("\nCompleted jobs (available for /feedback):")
+        for job_id, info in completed_jobs.items():
+            project = info.get("project_name", "?")
+            cmd = info.get("command", "?")
+            completed = info.get("completed_at")
+            if completed:
+                age = (datetime.now() - completed).total_seconds() / 60
+                if age < 60:
+                    age_str = f"{age:.0f}m ago"
+                else:
+                    age_str = f"{age/60:.1f}h ago"
+            else:
+                age_str = "?"
+            status_lines.append(f"  [{job_id}] {project} /{cmd} ({age_str})")
+
+        status_lines.append("")
+        status_lines.append("Use /feedback <project> <job-id> <prompt> to continue")
 
     # Check running background processes (from /up)
     running_projects = process.get_running_projects()
@@ -667,7 +729,7 @@ async def cmd_status(messenger, context: dict, args: list) -> None:
                 status_lines.append(f"  - {project_name} (PID: {proc.pid}, exited with code {proc.returncode})")
 
     if not status_lines:
-        await messenger.reply(context, "No running queries or processes.")
+        await messenger.reply(context, "No running queries, completed jobs, or processes.")
         return
 
     await messenger.reply(context, "\n".join(status_lines))

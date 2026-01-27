@@ -30,8 +30,11 @@ PROJECT_SESSIONS = {}
 # Running queries storage: {project_name: {query_id: {"task": Task, "command": str, "prompt": str, "started_at": datetime, "worktree_path": str, "project_workdir": str}}}
 RUNNING_QUERIES = {}
 
+# Completed jobs storage for feedback: {query_id: {"session_id": str, "worktree_path": str, "project_workdir": str, "project_name": str, "command": str, "completed_at": datetime}}
+COMPLETED_JOBS = {}
 
-async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: str = None, project_name: str = None, command: str = None, user_prompt: str = None, worktree_path: str = None, project_workdir: str = None, query_id: str = None) -> tuple:
+
+async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: str = None, project_name: str = None, command: str = None, user_prompt: str = None, worktree_path: str = None, project_workdir: str = None, query_id: str = None, keep_worktree: bool = False) -> tuple:
     """Execute Claude query using SDK and return (duration_minutes, session_id).
 
     Args:
@@ -45,6 +48,7 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
         worktree_path: Path to the worktree (for cleanup)
         project_workdir: Original project workdir (for worktree cleanup)
         query_id: Optional query ID (generated if not provided)
+        keep_worktree: If True, don't cleanup worktree after completion (for feedback)
     """
     start_time = datetime.now()
     if not query_id:
@@ -110,12 +114,6 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
         else:
             raise
     finally:
-        # Clean up worktree if used
-        if worktree_path and project_workdir:
-            from . import git
-            logger.info(f"Cleaning up worktree for query {query_id}")
-            git.cleanup_worktree(project_workdir, worktree_path)
-
         # Remove from running queries
         if project_name and project_name in RUNNING_QUERIES:
             if query_id in RUNNING_QUERIES[project_name]:
@@ -123,6 +121,30 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
             # Clean up empty project entries
             if not RUNNING_QUERIES[project_name]:
                 del RUNNING_QUERIES[project_name]
+
+        # Handle worktree cleanup or preservation
+        if worktree_path and project_workdir:
+            if was_cancelled:
+                # Always cleanup on cancellation
+                from . import git
+                logger.info(f"Cleaning up worktree for cancelled query {query_id}")
+                git.cleanup_worktree(project_workdir, worktree_path)
+            elif keep_worktree and session_id:
+                # Store for potential feedback
+                COMPLETED_JOBS[query_id] = {
+                    "session_id": session_id,
+                    "worktree_path": worktree_path,
+                    "project_workdir": project_workdir,
+                    "project_name": project_name,
+                    "command": command,
+                    "completed_at": datetime.now()
+                }
+                logger.info(f"Keeping worktree for job {query_id} for potential feedback")
+            else:
+                # Clean up worktree
+                from . import git
+                logger.info(f"Cleaning up worktree for query {query_id}")
+                git.cleanup_worktree(project_workdir, worktree_path)
 
     end_time = datetime.now()
     duration_minutes = (end_time - start_time).total_seconds() / 60
@@ -409,3 +431,82 @@ def clear_session(project_name: str):
     """Clear stored session ID for a project."""
     PROJECT_SESSIONS.pop(project_name, None)
     logger.info(f"Cleared existing session for project {project_name}")
+
+
+def get_completed_job(job_id: str) -> dict | None:
+    """Get completed job info by job ID.
+
+    Args:
+        job_id: The job/query ID
+
+    Returns:
+        Dict with job info or None if not found
+    """
+    return COMPLETED_JOBS.get(job_id)
+
+
+def remove_completed_job(job_id: str) -> bool:
+    """Remove a completed job and cleanup its worktree.
+
+    Args:
+        job_id: The job/query ID
+
+    Returns:
+        True if job was found and removed
+    """
+    from . import git
+
+    if job_id not in COMPLETED_JOBS:
+        return False
+
+    job_info = COMPLETED_JOBS[job_id]
+    worktree_path = job_info.get("worktree_path")
+    project_workdir = job_info.get("project_workdir")
+
+    if worktree_path and project_workdir:
+        logger.info(f"Cleaning up worktree for completed job {job_id}")
+        git.cleanup_worktree(project_workdir, worktree_path)
+
+    del COMPLETED_JOBS[job_id]
+    logger.info(f"Removed completed job {job_id}")
+    return True
+
+
+def get_completed_jobs_for_project(project_name: str) -> dict:
+    """Get all completed jobs for a project.
+
+    Args:
+        project_name: Project name
+
+    Returns:
+        Dict of {job_id: job_info}
+    """
+    return {
+        job_id: info
+        for job_id, info in COMPLETED_JOBS.items()
+        if info.get("project_name") == project_name
+    }
+
+
+def cleanup_old_completed_jobs(max_age_hours: int = 24):
+    """Clean up completed jobs older than max_age_hours.
+
+    Args:
+        max_age_hours: Maximum age in hours before cleanup
+    """
+    from . import git
+    from datetime import timedelta
+
+    cutoff = datetime.now() - timedelta(hours=max_age_hours)
+    jobs_to_remove = []
+
+    for job_id, info in COMPLETED_JOBS.items():
+        completed_at = info.get("completed_at")
+        if completed_at and completed_at < cutoff:
+            jobs_to_remove.append(job_id)
+
+    for job_id in jobs_to_remove:
+        remove_completed_job(job_id)
+
+    if jobs_to_remove:
+        logger.info(f"Cleaned up {len(jobs_to_remove)} old completed jobs")

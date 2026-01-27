@@ -278,7 +278,8 @@ Write the output in {output_file}"""
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.FEAT_RULES, worktree_path,
             project_name=project_name, command="feat", user_prompt=user_prompt,
-            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True  # Keep worktree for potential feedback
         )
 
         # Store session for future /feedback commands
@@ -360,7 +361,8 @@ Write the output in {output_file}"""
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.FIX_RULES, worktree_path,
             project_name=project_name, command="fix", user_prompt=user_prompt,
-            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True  # Keep worktree for potential feedback
         )
 
         # Store session for future /feedback commands
@@ -442,7 +444,8 @@ Write the output in {output_file}"""
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.PLAN_RULES, worktree_path,
             project_name=project_name, command="plan", user_prompt=user_prompt,
-            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True  # Keep worktree for potential feedback
         )
 
         # Store session for future /feedback commands
@@ -461,7 +464,7 @@ Write the output in {output_file}"""
 
 
 async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /feedback command. Format: /feedback project-name prompt"""
+    """Handle /feedback command. Format: /feedback project-name [job-id] prompt"""
     messenger = get_messenger()
 
     if not update.message:
@@ -477,11 +480,10 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     logger.info("Received /feedback command")
 
     if not context.args or len(context.args) < 2:
-        await reply(update, "Usage: /feedback project-name prompt")
+        await reply(update, "Usage: /feedback project-name [job-id] prompt\n\nUse /status to see available job IDs.")
         return
 
     project_name = context.args[0]
-    user_prompt = " ".join(context.args[1:])
 
     project = config.get_project(project_name)
     if not project:
@@ -491,29 +493,67 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
+    # Check if second argument is a job ID (8 char hex) or part of the prompt
+    job_id = None
+    if len(context.args) >= 2:
+        potential_job_id = context.args[1]
+        # Check if it looks like a job ID (8 hex chars) and exists in completed jobs
+        if len(potential_job_id) == 8 and claude.get_completed_job(potential_job_id):
+            job_id = potential_job_id
+            user_prompt = " ".join(context.args[2:]) if len(context.args) > 2 else ""
+        else:
+            user_prompt = " ".join(context.args[1:])
+
+    if not user_prompt:
+        await reply(update, "Usage: /feedback project-name [job-id] prompt\n\nPlease provide feedback text.")
+        return
+
     if not await git.clone_repository_if_needed(messenger, update, project_repo, project_workdir):
         return
 
     if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
-    # Get existing session for this project (to continue conversation)
-    existing_session = claude.get_session(project_name)
-    if existing_session:
-        logger.info(f"Resuming session {existing_session} for project {project_name}")
-    else:
-        logger.info(f"No existing session for project {project_name}, starting fresh")
+    # Determine worktree and session based on job_id
+    if job_id:
+        # Use existing job's worktree and session
+        job_info = claude.get_completed_job(job_id)
+        if not job_info:
+            await reply(update, f"Job '{job_id}' not found. Use /status to see available jobs.")
+            return
 
-    # Generate query ID and create worktree
-    query_id = str(uuid.uuid4())[:8]
-    worktree_path = await git.create_worktree(messenger, update, project_workdir, project_name, query_id)
-    if not worktree_path:
-        return
+        if job_info.get("project_name") != project_name:
+            await reply(update, f"Job '{job_id}' belongs to project '{job_info.get('project_name')}', not '{project_name}'.")
+            return
 
-    if existing_session:
-        await reply(update, f"Continuing session for project: {project_name} (query: {query_id})...")
+        worktree_path = job_info.get("worktree_path")
+        existing_session = job_info.get("session_id")
+        query_id = job_id  # Reuse the same job ID for continuity
+
+        logger.info(f"Resuming job {job_id} with session {existing_session} in worktree {worktree_path}")
+        await reply(update, f"Continuing job {job_id} for project: {project_name}...")
+
+        # Remove from completed jobs since we're continuing it
+        # (Will be re-added when this feedback completes)
+        del claude.COMPLETED_JOBS[job_id]
     else:
-        await reply(update, f"No existing session found. Starting new session for project: {project_name} (query: {query_id})...")
+        # Original behavior: use project session and create new worktree
+        existing_session = claude.get_session(project_name)
+        if existing_session:
+            logger.info(f"Resuming session {existing_session} for project {project_name}")
+        else:
+            logger.info(f"No existing session for project {project_name}, starting fresh")
+
+        # Generate query ID and create worktree
+        query_id = str(uuid.uuid4())[:8]
+        worktree_path = await git.create_worktree(messenger, update, project_workdir, project_name, query_id)
+        if not worktree_path:
+            return
+
+        if existing_session:
+            await reply(update, f"Continuing session for project: {project_name} (query: {query_id})...")
+        else:
+            await reply(update, f"No existing session found. Starting new session for project: {project_name} (query: {query_id})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
 
@@ -531,7 +571,8 @@ Write the output in {output_file}"""
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.FEEDBACK_RULES, worktree_path,
             resume=existing_session, project_name=project_name, command="feedback", user_prompt=user_prompt,
-            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True  # Keep for potential further feedback
         )
 
         # Update session for future /feedback commands
@@ -664,7 +705,7 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /status command. Shows running projects."""
+    """Handle /status command. Shows running projects and completed jobs."""
     if not update.message:
         logger.info("Received /status command with no message object")
         return
@@ -699,7 +740,28 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 status_lines.append(f"  [{query_id}] {project_name} /{cmd}: {prompt} ({elapsed_str})")
 
         status_lines.append("")
-        status_lines.append("Use /cancel <project> to cancel all, or /cancel <project> <id> for specific query")
+        status_lines.append("Use /cancel <project> [id] to cancel queries")
+
+    # Check completed jobs available for feedback
+    completed_jobs = claude.COMPLETED_JOBS
+    if completed_jobs:
+        status_lines.append("\nCompleted jobs (available for /feedback):")
+        for job_id, info in completed_jobs.items():
+            project = info.get("project_name", "?")
+            cmd = info.get("command", "?")
+            completed = info.get("completed_at")
+            if completed:
+                age = (dt.now() - completed).total_seconds() / 60
+                if age < 60:
+                    age_str = f"{age:.0f}m ago"
+                else:
+                    age_str = f"{age/60:.1f}h ago"
+            else:
+                age_str = "?"
+            status_lines.append(f"  [{job_id}] {project} /{cmd} ({age_str})")
+
+        status_lines.append("")
+        status_lines.append("Use /feedback <project> <job-id> <prompt> to continue")
 
     # Check running background processes (from /up)
     running_projects = process.get_running_projects()
@@ -713,7 +775,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 status_lines.append(f"  - {project_name} (PID: {proc.pid}, exited with code {proc.returncode})")
 
     if not status_lines:
-        await reply(update, "No running queries or processes.")
+        await reply(update, "No running queries, completed jobs, or processes.")
         return
 
     await reply(update, "\n".join(status_lines))
@@ -932,8 +994,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
   Plan and explore a task (creates new branch)
   Starts a new session (clears previous context)
 
-/feedback <project-name> <feedback>
-  Continue work on the current branch with context from previous /feat, /fix, or /plan
+/feedback <project-name> [job-id] <feedback>
+  Continue work with context from previous /feat, /fix, or /plan
+  Optional: specify job-id to continue a specific job (see /status)
 
 /init <project-name>
   Initialize CLAUDE.md for a project and spin up if project_up is configured

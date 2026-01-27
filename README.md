@@ -269,13 +269,16 @@ Implement new features in a specific project. Creates a new branch and merge req
 /feat my-project Add user authentication with JWT
 ```
 
-#### `/feedback <project-name> <feedback>`
-Continue work on an existing branch with feedback.
+#### `/feedback <project-name> [job-id] <feedback>`
+Continue work on an existing branch with feedback. Optionally specify a job ID to continue a specific job (useful for parallel jobs).
 
-**Example:**
+**Examples:**
 ```
 /feedback my-project Fix the validation on the login form
+/feedback my-project abc12345 Add more unit tests
 ```
+
+Use `/status` to see available job IDs.
 
 #### `/fix <project-name> <issue>`
 Fix bugs in a specific project.
