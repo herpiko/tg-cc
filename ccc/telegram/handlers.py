@@ -1,5 +1,6 @@
 """Telegram command handlers for ccc bot."""
 
+import asyncio
 import logging
 import os
 import subprocess
@@ -175,25 +176,38 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
-    await reply(update, f"Processing for project: {project_name}...")
+    # Generate query ID and create worktree
+    query_id = str(uuid.uuid4())[:8]
+    worktree_path = await git.create_worktree(messenger, update, project_workdir, project_name, query_id)
+    if not worktree_path:
+        return
 
-    request_uuid = str(uuid.uuid4())
-    output_file = f"/tmp/output_{request_uuid}.txt"
+    await reply(update, f"Processing for project: {project_name} (query: {query_id})...")
+
+    output_file = f"/tmp/output_{query_id}.txt"
 
     try:
         prompt = f"""Project: {project_name}
 Repository: {project_repo}
-Working Directory: {project_workdir}
+Working Directory: {worktree_path}
 
 Query: {user_text}
 
 Write the output in {output_file}"""
 
-        logger.info(f"Running query for project {project_name} with UUID {request_uuid}")
+        logger.info(f"Running query {query_id} for project {project_name}")
 
-        duration_minutes, _ = await claude.run_claude_query(prompt, config.ASK_RULES, project_workdir, project_name=project_name)
+        duration_minutes, _ = await claude.run_claude_query(
+            prompt, config.ASK_RULES, worktree_path,
+            project_name=project_name, command="ask", user_prompt=user_text,
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+        )
         await process_output_file(update, output_file, duration_minutes)
 
+    except asyncio.CancelledError:
+        logger.info(f"Query {query_id} for project {project_name} was cancelled")
+        await reply(update, f"Query {query_id} for {project_name} was cancelled.")
+        cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running query: {e}")
         await reply(update, f"Error: {str(e)}")
@@ -237,35 +251,45 @@ async def cmd_feat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
-    if not await git.refresh_to_main_branch(messenger, update, project_workdir):
-        return
-
     # Clear existing session for this project (starting fresh)
     claude.clear_session(project_name)
 
-    await reply(update, f"Processing for project: {project_name}...")
+    # Generate query ID and create worktree (starts from origin/main)
+    query_id = str(uuid.uuid4())[:8]
+    worktree_path = await git.create_worktree(messenger, update, project_workdir, project_name, query_id)
+    if not worktree_path:
+        return
 
-    request_uuid = str(uuid.uuid4())
-    output_file = f"/tmp/output_{request_uuid}.txt"
+    await reply(update, f"Processing for project: {project_name} (query: {query_id})...")
+
+    output_file = f"/tmp/output_{query_id}.txt"
 
     try:
         prompt = f"""Project: {project_name}
 Repository: {project_repo}
-Working Directory: {project_workdir}
+Working Directory: {worktree_path}
 
 Task: {user_prompt}
 
 Write the output in {output_file}"""
 
-        logger.info(f"Running query for project {project_name} with UUID {request_uuid}")
+        logger.info(f"Running query {query_id} for project {project_name}")
 
-        duration_minutes, session_id = await claude.run_claude_query(prompt, config.FEAT_RULES, project_workdir, project_name=project_name)
+        duration_minutes, session_id = await claude.run_claude_query(
+            prompt, config.FEAT_RULES, worktree_path,
+            project_name=project_name, command="feat", user_prompt=user_prompt,
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+        )
 
         # Store session for future /feedback commands
         claude.set_session(project_name, session_id)
 
         await process_output_file(update, output_file, duration_minutes)
 
+    except asyncio.CancelledError:
+        logger.info(f"Query {query_id} for project {project_name} was cancelled")
+        await reply(update, f"Query {query_id} for {project_name} was cancelled.")
+        cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running query: {e}")
         await reply(update, f"Error: {str(e)}")
@@ -309,35 +333,45 @@ async def cmd_fix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
-    await reply(update, f"Processing for project: {project_name}...")
-
-    if not await git.refresh_to_main_branch(messenger, update, project_workdir):
-        return
-
     # Clear existing session for this project (starting fresh)
     claude.clear_session(project_name)
 
-    request_uuid = str(uuid.uuid4())
-    output_file = f"/tmp/output_{request_uuid}.txt"
+    # Generate query ID and create worktree (starts from origin/main)
+    query_id = str(uuid.uuid4())[:8]
+    worktree_path = await git.create_worktree(messenger, update, project_workdir, project_name, query_id)
+    if not worktree_path:
+        return
+
+    await reply(update, f"Processing for project: {project_name} (query: {query_id})...")
+
+    output_file = f"/tmp/output_{query_id}.txt"
 
     try:
         prompt = f"""Project: {project_name}
 Repository: {project_repo}
-Working Directory: {project_workdir}
+Working Directory: {worktree_path}
 
 Task: {user_prompt}
 
 Write the output in {output_file}"""
 
-        logger.info(f"Running query for project {project_name} with UUID {request_uuid}")
+        logger.info(f"Running query {query_id} for project {project_name}")
 
-        duration_minutes, session_id = await claude.run_claude_query(prompt, config.FIX_RULES, project_workdir, project_name=project_name)
+        duration_minutes, session_id = await claude.run_claude_query(
+            prompt, config.FIX_RULES, worktree_path,
+            project_name=project_name, command="fix", user_prompt=user_prompt,
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+        )
 
         # Store session for future /feedback commands
         claude.set_session(project_name, session_id)
 
         await process_output_file(update, output_file, duration_minutes)
 
+    except asyncio.CancelledError:
+        logger.info(f"Query {query_id} for project {project_name} was cancelled")
+        await reply(update, f"Query {query_id} for {project_name} was cancelled.")
+        cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running query: {e}")
         await reply(update, f"Error: {str(e)}")
@@ -381,35 +415,45 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await claude.initialize_claude_md(messenger, update, project_workdir):
         return
 
-    if not await git.refresh_to_main_branch(messenger, update, project_workdir):
-        return
-
     # Clear existing session for this project (starting fresh)
     claude.clear_session(project_name)
 
-    await reply(update, f"Planning for project: {project_name}...")
+    # Generate query ID and create worktree (starts from origin/main)
+    query_id = str(uuid.uuid4())[:8]
+    worktree_path = await git.create_worktree(messenger, update, project_workdir, project_name, query_id)
+    if not worktree_path:
+        return
 
-    request_uuid = str(uuid.uuid4())
-    output_file = f"/tmp/output_{request_uuid}.txt"
+    await reply(update, f"Planning for project: {project_name} (query: {query_id})...")
+
+    output_file = f"/tmp/output_{query_id}.txt"
 
     try:
         prompt = f"""Project: {project_name}
 Repository: {project_repo}
-Working Directory: {project_workdir}
+Working Directory: {worktree_path}
 
 Task: {user_prompt}
 
 Write the output in {output_file}"""
 
-        logger.info(f"Running query for project {project_name} with UUID {request_uuid}")
+        logger.info(f"Running query {query_id} for project {project_name}")
 
-        duration_minutes, session_id = await claude.run_claude_query(prompt, config.PLAN_RULES, project_workdir, project_name=project_name)
+        duration_minutes, session_id = await claude.run_claude_query(
+            prompt, config.PLAN_RULES, worktree_path,
+            project_name=project_name, command="plan", user_prompt=user_prompt,
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+        )
 
         # Store session for future /feedback commands
         claude.set_session(project_name, session_id)
 
         await process_output_file(update, output_file, duration_minutes)
 
+    except asyncio.CancelledError:
+        logger.info(f"Query {query_id} for project {project_name} was cancelled")
+        await reply(update, f"Query {query_id} for {project_name} was cancelled.")
+        cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running query: {e}")
         await reply(update, f"Error: {str(e)}")
@@ -456,33 +500,49 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # Get existing session for this project (to continue conversation)
     existing_session = claude.get_session(project_name)
     if existing_session:
-        await reply(update, f"Continuing session for project: {project_name}...")
         logger.info(f"Resuming session {existing_session} for project {project_name}")
     else:
-        await reply(update, f"No existing session found. Starting new session for project: {project_name}...")
         logger.info(f"No existing session for project {project_name}, starting fresh")
 
-    request_uuid = str(uuid.uuid4())
-    output_file = f"/tmp/output_{request_uuid}.txt"
+    # Generate query ID and create worktree
+    query_id = str(uuid.uuid4())[:8]
+    worktree_path = await git.create_worktree(messenger, update, project_workdir, project_name, query_id)
+    if not worktree_path:
+        return
+
+    if existing_session:
+        await reply(update, f"Continuing session for project: {project_name} (query: {query_id})...")
+    else:
+        await reply(update, f"No existing session found. Starting new session for project: {project_name} (query: {query_id})...")
+
+    output_file = f"/tmp/output_{query_id}.txt"
 
     try:
         prompt = f"""Project: {project_name}
 Repository: {project_repo}
-Working Directory: {project_workdir}
+Working Directory: {worktree_path}
 
 Task: {user_prompt}
 
 Write the output in {output_file}"""
 
-        logger.info(f"Running query for project {project_name} with UUID {request_uuid}")
+        logger.info(f"Running query {query_id} for project {project_name}")
 
-        duration_minutes, session_id = await claude.run_claude_query(prompt, config.FEEDBACK_RULES, project_workdir, resume=existing_session, project_name=project_name)
+        duration_minutes, session_id = await claude.run_claude_query(
+            prompt, config.FEEDBACK_RULES, worktree_path,
+            resume=existing_session, project_name=project_name, command="feedback", user_prompt=user_prompt,
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+        )
 
         # Update session for future /feedback commands
         claude.set_session(project_name, session_id)
 
         await process_output_file(update, output_file, duration_minutes)
 
+    except asyncio.CancelledError:
+        logger.info(f"Query {query_id} for project {project_name} was cancelled")
+        await reply(update, f"Query {query_id} for {project_name} was cancelled.")
+        cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running query: {e}")
         await reply(update, f"Error: {str(e)}")
@@ -617,25 +677,50 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     logger.info("Received /status command")
 
-    running_projects = process.get_running_projects()
-    if not running_projects:
-        await reply(update, "No running projects.")
-        return
+    from datetime import datetime as dt
+    status_lines = []
 
-    status_lines = ["Running projects:"]
-    for project_name, process_info in running_projects.items():
-        proc, log_path, _ = process_info
-        # Check if process is still running
-        if proc.poll() is None:
-            status_lines.append(f"  - {project_name} (PID: {proc.pid})")
-        else:
-            status_lines.append(f"  - {project_name} (PID: {proc.pid}, exited with code {proc.returncode})")
+    # Check running Claude queries
+    running_queries = claude.get_all_running_queries()
+    if running_queries:
+        status_lines.append("Running Claude queries:")
+        for project_name, queries in running_queries.items():
+            for query_id, info in queries.items():
+                cmd = info.get("command", "query")
+                prompt = info.get("prompt", "")[:50]
+                if len(info.get("prompt", "")) > 50:
+                    prompt += "..."
+                started = info.get("started_at")
+                if started:
+                    elapsed = (dt.now() - started).total_seconds() / 60
+                    elapsed_str = f"{elapsed:.1f}m"
+                else:
+                    elapsed_str = "?"
+                status_lines.append(f"  [{query_id}] {project_name} /{cmd}: {prompt} ({elapsed_str})")
+
+        status_lines.append("")
+        status_lines.append("Use /cancel <project> to cancel all, or /cancel <project> <id> for specific query")
+
+    # Check running background processes (from /up)
+    running_projects = process.get_running_projects()
+    if running_projects:
+        status_lines.append("\nRunning background processes:")
+        for project_name, process_info in running_projects.items():
+            proc, log_path, _ = process_info
+            if proc.poll() is None:
+                status_lines.append(f"  - {project_name} (PID: {proc.pid})")
+            else:
+                status_lines.append(f"  - {project_name} (PID: {proc.pid}, exited with code {proc.returncode})")
+
+    if not status_lines:
+        await reply(update, "No running queries or processes.")
+        return
 
     await reply(update, "\n".join(status_lines))
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /cancel command. Format: /cancel [project-name]"""
+    """Handle /cancel command. Format: /cancel [project-name] [query-id]"""
     if not update.message:
         logger.info("Received /cancel command with no message object")
         return
@@ -648,7 +733,7 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     logger.info("Received /cancel command")
 
-    # If no project specified, show running queries and cancel all
+    # If no project specified, cancel all queries across all projects
     if not context.args or len(context.args) < 1:
         running = claude.get_all_running_queries()
         if not running:
@@ -656,13 +741,13 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
 
         # Cancel all running queries
-        cancelled = []
+        all_cancelled = []
         for project_name in list(running.keys()):
-            if claude.cancel_query(project_name):
-                cancelled.append(project_name)
+            cancelled = claude.cancel_query(project_name)
+            all_cancelled.extend([f"{project_name}:{qid}" for qid in cancelled])
 
-        if cancelled:
-            await reply(update, f"Cancelled queries for: {', '.join(cancelled)}")
+        if all_cancelled:
+            await reply(update, f"Cancelled {len(all_cancelled)} queries: {', '.join(all_cancelled)}")
         else:
             await reply(update, "No queries were cancelled.")
         return
@@ -674,17 +759,33 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
 
-    # Check if there's a running query for this project
-    task = claude.get_running_query(project_name)
-    if not task or task.done():
-        await reply(update, f"No running query for project {project_name}.")
+    # Check if a specific query ID was provided
+    query_id = context.args[1] if len(context.args) > 1 else None
+
+    # Check if there are running queries for this project
+    queries = claude.get_running_queries_for_project(project_name)
+    if not queries:
+        await reply(update, f"No running queries for project {project_name}.")
         return
 
-    # Cancel the query
-    if claude.cancel_query(project_name):
-        await reply(update, f"Cancelled query for project {project_name}.")
+    if query_id:
+        # Cancel specific query
+        if query_id not in queries:
+            await reply(update, f"Query ID '{query_id}' not found for project {project_name}. Running queries: {', '.join(queries.keys())}")
+            return
+
+        cancelled = claude.cancel_query(project_name, query_id)
+        if cancelled:
+            await reply(update, f"Cancelled query {query_id} for project {project_name}.")
+        else:
+            await reply(update, f"Failed to cancel query {query_id} for project {project_name}.")
     else:
-        await reply(update, f"Failed to cancel query for project {project_name}.")
+        # Cancel all queries for the project
+        cancelled = claude.cancel_query(project_name)
+        if cancelled:
+            await reply(update, f"Cancelled {len(cancelled)} queries for project {project_name}: {', '.join(cancelled)}")
+        else:
+            await reply(update, f"Failed to cancel queries for project {project_name}.")
 
 
 async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -846,8 +947,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /status
   Show running projects
 
-/cancel [project-name]
-  Cancel running Claude query (cancels all if no project specified)
+/cancel [project-name] [query-id]
+  Cancel running Claude queries. Without args: cancel all.
+  With project: cancel all for that project.
+  With project + id: cancel specific query.
 
 /log <project-name> [lines]
   Show last N lines of project logs (default: 50)

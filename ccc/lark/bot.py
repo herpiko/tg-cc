@@ -11,6 +11,7 @@ from flask import Flask, request, jsonify
 from ccc import config
 from ccc.lark.messenger import LarkMessenger
 from ccc.lark import handlers
+from ccc.lark import dedup
 
 # Ensure ~/.local/bin is in PATH for commands like claude-monitor
 user_local_bin = os.path.expanduser("~/.local/bin")
@@ -38,8 +39,10 @@ def verify_signature(timestamp: str, nonce: str, body: str, signature: str) -> b
     Returns:
         True if signature is valid
     """
-    if not config.LARK_VERIFICATION_TOKEN:
-        return True  # Skip verification if no token configured
+    # Skip verification if no token configured
+    if not config.LARK_VERIFICATION_TOKEN or config.LARK_VERIFICATION_TOKEN in ("", "xxx"):
+        logger.info("Skipping signature verification (no token configured)")
+        return True
 
     string_to_sign = timestamp + nonce + config.LARK_VERIFICATION_TOKEN + body
     calculated_signature = hashlib.sha256(string_to_sign.encode('utf-8')).hexdigest()
@@ -87,11 +90,21 @@ def webhook():
     try:
         # Get request data
         raw_body = request.get_data(as_text=True)
-        data = request.get_json()
+        logger.info(f"Received webhook request (truncated): {raw_body[:200]}...")
 
-        # Handle URL verification challenge
+        try:
+            data = request.get_json()
+        except Exception as e:
+            logger.error(f"Failed to parse JSON: {e}")
+            return jsonify({"code": 1, "msg": "Invalid JSON"})
+
+        if data is None:
+            logger.error("Request body is not valid JSON")
+            return jsonify({"code": 1, "msg": "Invalid JSON"})
+
+        # Handle URL verification challenge (v2 format)
         if "challenge" in data:
-            logger.info("Received URL verification challenge")
+            logger.info(f"Received URL verification challenge: {data['challenge']}")
             return jsonify({"challenge": data["challenge"]})
 
         # Handle encrypted events
@@ -117,6 +130,9 @@ def webhook():
             return jsonify({"code": 1, "msg": "Invalid signature"})
 
         # Handle event callback
+        logger.info(f"Checking for header in data: {'header' in data}")
+        logger.info(f"Messenger initialized: {messenger is not None}")
+
         if "header" in data:
             event_type = data.get("header", {}).get("event_type", "")
             event = data.get("event", {})
@@ -127,22 +143,60 @@ def webhook():
             if event_type == "im.message.receive_v1":
                 message = event.get("message", {})
                 message_type = message.get("message_type", "")
+                content = message.get("content", "")
 
-                # Only handle text messages
-                if message_type == "text":
+                # Log full message structure to see all available fields
+                logger.info(f"=== FULL MESSAGE OBJECT ===")
+                for key, value in message.items():
+                    logger.info(f"  {key}: {value}")
+                logger.info(f"=== END MESSAGE OBJECT ===")
+
+                logger.info(f"Message type: {message_type}, content: {content[:200]}")
+
+                # Check if it's a text message (by message_type or content structure)
+                is_text_message = message_type == "text"
+                if not is_text_message and content:
+                    try:
+                        content_dict = json.loads(content)
+                        is_text_message = "text" in content_dict
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                if is_text_message:
+                    logger.info("Processing as text message")
+
+                    # Extract message_id and event_id for deduplication
+                    message_id = message.get("message_id") or message.get("msg_id") or message.get("id")
+                    event_id = data.get("header", {}).get("event_id")
+
+                    logger.info(f"Dedup check: message_id={message_id}, event_id={event_id}")
+
+                    # Check for duplicate message
+                    if dedup.is_duplicate(message_id, event_id):
+                        logger.info(f"Skipping duplicate message: {message_id}")
+                        return jsonify({"code": 0, "msg": "success"})
+
+                    # Mark as processed before handling to prevent race conditions
+                    dedup.mark_processed(message_id, event_id)
+
                     # Run the handler asynchronously
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     try:
                         loop.run_until_complete(handlers.handle_message(messenger, event))
+                    except Exception as e:
+                        logger.error(f"Error in message handler: {e}")
                     finally:
                         loop.close()
+                else:
+                    logger.info(f"Skipping non-text message type: {message_type}")
 
             return jsonify({"code": 0, "msg": "success"})
 
         # Handle v1 event format (legacy)
         event_type = data.get("type", "")
         if event_type == "url_verification":
+            logger.info(f"Received URL verification (v1 format): {data.get('challenge', '')}")
             return jsonify({"challenge": data.get("challenge", "")})
 
         return jsonify({"code": 0, "msg": "success"})
@@ -185,6 +239,9 @@ def run(config_path: str = None):
         )
 
         messenger = LarkMessenger(lark_client)
+
+        # Clean up old dedup entries on startup
+        dedup.cleanup_old_entries()
 
         logger.info(f"Lark bot is starting on port {config.LARK_WEBHOOK_PORT}...")
         logger.info("Listening for webhook events...")

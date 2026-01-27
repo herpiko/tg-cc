@@ -29,43 +29,79 @@ class LarkMessenger(Messenger):
             context: Dict containing chat_id, message_id, and optionally root_id
             text: The text message to send
         """
+        logger.info(f"Attempting to reply with context: {context}")
+
         try:
             from lark_oapi.api.im.v1 import (
                 ReplyMessageRequest,
                 ReplyMessageRequestBody,
+                CreateMessageRequest,
+                CreateMessageRequestBody,
             )
+            import uuid as uuid_lib
 
-            # Use root_id for thread replies, fall back to message_id
-            root_id = context.get("root_id") or context.get("message_id")
+            chat_id = context.get("chat_id")
+            message_id = context.get("message_id")
+            # For thread replies, use root_id if available, otherwise use message_id as root
+            root_id = context.get("root_id") or message_id
 
-            if not root_id:
-                logger.error("No message_id or root_id in context for reply")
-                return
-
-            # Build and send the reply
-            request = (
-                ReplyMessageRequest.builder()
-                .message_id(root_id)
-                .request_body(
-                    ReplyMessageRequestBody.builder()
-                    .content(json.dumps({"text": text}))
-                    .msg_type("text")
+            if root_id:
+                # Use ReplyMessageRequest with reply_in_thread=True for true thread replies
+                logger.info(f"Sending thread reply to message: {root_id}, reply_in_thread=True")
+                request = (
+                    ReplyMessageRequest.builder()
+                    .message_id(root_id)
+                    .request_body(
+                        ReplyMessageRequestBody.builder()
+                        .content(json.dumps({"text": text}))
+                        .msg_type("text")
+                        .reply_in_thread(True)
+                        .uuid(str(uuid_lib.uuid4()))
+                        .build()
+                    )
                     .build()
                 )
-                .build()
-            )
 
-            response = self.client.im.v1.message.reply(request)
+                response = self.client.im.v1.message.reply(request)
+                logger.info(f"Reply response: success={response.success()}, code={response.code}, msg={response.msg}")
 
-            if not response.success():
-                logger.error(
-                    f"Failed to send Lark reply: code={response.code}, msg={response.msg}"
+                if not response.success():
+                    logger.error(
+                        f"Failed to send Lark thread reply: code={response.code}, msg={response.msg}"
+                    )
+                else:
+                    logger.info(f"Sent Lark thread reply to message {root_id}")
+
+            elif chat_id:
+                # Fallback: send to chat directly if no message_id/root_id
+                logger.warning(f"No message_id/root_id, sending to chat_id: {chat_id}")
+                request = (
+                    CreateMessageRequest.builder()
+                    .receive_id_type("chat_id")
+                    .request_body(
+                        CreateMessageRequestBody.builder()
+                        .receive_id(chat_id)
+                        .content(json.dumps({"text": text}))
+                        .msg_type("text")
+                        .uuid(str(uuid_lib.uuid4()))
+                        .build()
+                    )
+                    .build()
                 )
+
+                response = self.client.im.v1.message.create(request)
+
+                if not response.success():
+                    logger.error(
+                        f"Failed to send Lark message: code={response.code}, msg={response.msg}"
+                    )
+                else:
+                    logger.info(f"Sent Lark message to chat {chat_id}")
             else:
-                logger.info(f"Sent Lark reply to message {root_id}")
+                logger.error("No message_id, root_id, or chat_id in context for reply")
 
         except Exception as e:
-            logger.error(f"Error sending Lark reply: {e}")
+            logger.error(f"Error sending Lark reply: {e}", exc_info=True)
 
     def get_thread_context(self, context: dict) -> Optional[str]:
         """Get thread/conversation context from Lark message.

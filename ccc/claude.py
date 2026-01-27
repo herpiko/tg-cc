@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import subprocess
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -26,13 +27,28 @@ logger = logging.getLogger(__name__)
 # Session storage for conversation continuity: {project_name: session_id}
 PROJECT_SESSIONS = {}
 
-# Running queries storage: {project_name: asyncio.Task}
+# Running queries storage: {project_name: {query_id: {"task": Task, "command": str, "prompt": str, "started_at": datetime, "worktree_path": str, "project_workdir": str}}}
 RUNNING_QUERIES = {}
 
 
-async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: str = None, project_name: str = None) -> tuple:
-    """Execute Claude query using SDK and return (duration_minutes, session_id)."""
+async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: str = None, project_name: str = None, command: str = None, user_prompt: str = None, worktree_path: str = None, project_workdir: str = None, query_id: str = None) -> tuple:
+    """Execute Claude query using SDK and return (duration_minutes, session_id).
+
+    Args:
+        prompt: Full prompt to send to Claude
+        system_prompt: System prompt for Claude
+        cwd: Working directory (should be worktree_path if using worktrees)
+        resume: Session ID to resume (optional)
+        project_name: Project name for tracking
+        command: Command type (ask, feat, fix, plan, feedback)
+        user_prompt: Original user prompt/request for display
+        worktree_path: Path to the worktree (for cleanup)
+        project_workdir: Original project workdir (for worktree cleanup)
+        query_id: Optional query ID (generated if not provided)
+    """
     start_time = datetime.now()
+    if not query_id:
+        query_id = str(uuid.uuid4())[:8]  # Short ID for easier reference
 
     options = ClaudeAgentOptions(
         model='opus',
@@ -47,10 +63,21 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
 
     # Track the current task if project_name is provided
     if project_name:
-        RUNNING_QUERIES[project_name] = asyncio.current_task()
-        logger.info(f"Tracking query for project {project_name}")
+        if project_name not in RUNNING_QUERIES:
+            RUNNING_QUERIES[project_name] = {}
+
+        RUNNING_QUERIES[project_name][query_id] = {
+            "task": asyncio.current_task(),
+            "command": command or "query",
+            "prompt": user_prompt or prompt[:100],
+            "started_at": start_time,
+            "worktree_path": worktree_path,
+            "project_workdir": project_workdir
+        }
+        logger.info(f"Tracking query {query_id} for project {project_name}")
 
     session_id = None
+    was_cancelled = False
     try:
         async for message in query(prompt=prompt, options=options):
             if isinstance(message, AssistantMessage):
@@ -73,39 +100,120 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
                     logger.error(f"Query error: {message.result}")
                     print(f"[Error] {message.result}")
     except asyncio.CancelledError:
-        logger.info(f"Query cancelled for project {project_name}")
-        raise
+        logger.info(f"Query {query_id} cancelled for project {project_name}")
+        was_cancelled = True
+    except Exception as e:
+        # Catch stream-related exceptions that may occur during cancellation
+        if "WouldBlock" in str(type(e).__name__) or "Cancelled" in str(e):
+            logger.info(f"Query {query_id} stream interrupted for project {project_name}: {type(e).__name__}")
+            was_cancelled = True
+        else:
+            raise
     finally:
+        # Clean up worktree if used
+        if worktree_path and project_workdir:
+            from . import git
+            logger.info(f"Cleaning up worktree for query {query_id}")
+            git.cleanup_worktree(project_workdir, worktree_path)
+
         # Remove from running queries
         if project_name and project_name in RUNNING_QUERIES:
-            del RUNNING_QUERIES[project_name]
+            if query_id in RUNNING_QUERIES[project_name]:
+                del RUNNING_QUERIES[project_name][query_id]
+            # Clean up empty project entries
+            if not RUNNING_QUERIES[project_name]:
+                del RUNNING_QUERIES[project_name]
 
     end_time = datetime.now()
     duration_minutes = (end_time - start_time).total_seconds() / 60
+
+    if was_cancelled:
+        logger.info(f"Query was cancelled after {duration_minutes:.2f} minutes")
+        raise asyncio.CancelledError(f"Query cancelled for {project_name}")
 
     logger.info(f"Duration: {duration_minutes:.2f} minutes")
 
     return duration_minutes, session_id
 
 
-def get_running_query(project_name: str) -> asyncio.Task | None:
-    """Get running query task for a project."""
-    return RUNNING_QUERIES.get(project_name)
+def get_running_queries_for_project(project_name: str) -> dict:
+    """Get all running queries for a project.
+
+    Returns:
+        Dict of {query_id: query_info} for the project
+    """
+    if project_name not in RUNNING_QUERIES:
+        return {}
+
+    # Filter out completed tasks
+    active = {}
+    for query_id, info in RUNNING_QUERIES[project_name].items():
+        if not info["task"].done():
+            active[query_id] = info
+    return active
 
 
-def cancel_query(project_name: str) -> bool:
-    """Cancel a running query for a project. Returns True if cancelled."""
-    task = RUNNING_QUERIES.get(project_name)
-    if task and not task.done():
-        task.cancel()
-        logger.info(f"Cancelled query for project {project_name}")
-        return True
-    return False
+def cancel_query(project_name: str, query_id: str = None) -> list:
+    """Cancel running queries for a project.
+
+    Args:
+        project_name: Project name
+        query_id: Optional specific query ID. If None, cancels all queries for the project.
+
+    Returns:
+        List of cancelled query IDs
+    """
+    from . import git
+
+    if project_name not in RUNNING_QUERIES:
+        return []
+
+    cancelled = []
+
+    if query_id:
+        # Cancel specific query
+        if query_id in RUNNING_QUERIES[project_name]:
+            info = RUNNING_QUERIES[project_name][query_id]
+            if not info["task"].done():
+                info["task"].cancel()
+                cancelled.append(query_id)
+                logger.info(f"Cancelled query {query_id} for project {project_name}")
+                # Clean up worktree
+                worktree_path = info.get("worktree_path")
+                project_workdir = info.get("project_workdir")
+                if worktree_path and project_workdir:
+                    git.cleanup_worktree(project_workdir, worktree_path)
+    else:
+        # Cancel all queries for the project
+        for qid, info in RUNNING_QUERIES[project_name].items():
+            if not info["task"].done():
+                info["task"].cancel()
+                cancelled.append(qid)
+                logger.info(f"Cancelled query {qid} for project {project_name}")
+                # Clean up worktree
+                worktree_path = info.get("worktree_path")
+                project_workdir = info.get("project_workdir")
+                if worktree_path and project_workdir:
+                    git.cleanup_worktree(project_workdir, worktree_path)
+
+    return cancelled
 
 
 def get_all_running_queries() -> dict:
-    """Get all running queries."""
-    return {k: v for k, v in RUNNING_QUERIES.items() if not v.done()}
+    """Get all running queries across all projects.
+
+    Returns:
+        Dict of {project_name: {query_id: query_info}}
+    """
+    result = {}
+    for project_name, queries in RUNNING_QUERIES.items():
+        active = {}
+        for query_id, info in queries.items():
+            if not info["task"].done():
+                active[query_id] = info
+        if active:
+            result[project_name] = active
+    return result
 
 
 async def initialize_claude_md(messenger: Messenger, context: Any, project_workdir: str) -> bool:
