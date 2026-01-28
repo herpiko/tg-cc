@@ -605,7 +605,7 @@ async def _continue_in_worktree(messenger, context: dict, user_text: str, worktr
         # Clear session since we're in a new worktree
         existing_session = None
 
-    await messenger.reply(context, f"Continuing in worktree {query_id} for {project_name}...")
+    await messenger.reply(context, f"Continuing with query {query_id} for {project_name}...")
 
     output_file = f"/tmp/output_{query_id}_cont_{str(uuid.uuid4())[:4]}.txt"
 
@@ -1006,7 +1006,7 @@ async def cmd_feedback(messenger, context: dict, args: list) -> None:
         query_id = worktree_info.get("query_id")
 
         logger.info(f"Using thread worktree {query_id} with session {existing_session}")
-        await messenger.reply(context, f"Continuing in worktree {query_id} for project: {project_name}...")
+        await messenger.reply(context, f"Continuing with query {query_id} for project: {project_name}...")
     else:
         # Create new worktree
         existing_session = claude.get_session(project_name)
