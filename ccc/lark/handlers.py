@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import subprocess
 import uuid
 
 from ccc import config
@@ -228,6 +229,7 @@ async def handle_message(messenger, event: dict) -> None:
         "status": cmd_status,
         "cancel": cmd_cancel,
         "log": cmd_log,
+        "selfupdate": cmd_selfupdate,
     }
 
     handler = handlers.get(command)
@@ -394,7 +396,10 @@ async def cmd_help(messenger, context: dict, args: list) -> None:
   Without project-name: uses thread context
 
 /cleanup
-  Clean up orphan worktrees (those without running/completed jobs)"""
+  Clean up orphan worktrees (those without running/completed jobs)
+
+/selfupdate
+  Update bot from GitHub and restart"""
 
     await messenger.reply(context, help_text)
 
@@ -1394,3 +1399,110 @@ async def cmd_log(messenger, context: dict, args: list) -> None:
         output = output[:4000] + "\n\n[Output truncated...]"
 
     await messenger.reply(context, output)
+
+
+async def cmd_selfupdate(messenger, context: dict, args: list) -> None:
+    """Handle /selfupdate command. Updates bot from GitHub and restarts."""
+    import sys
+    import shutil
+
+    logger.info("Received /selfupdate command")
+
+    # Get the bot's installation directory
+    bot_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    config_path = os.path.join(bot_dir, "config.yaml")
+    config_backup_path = os.path.join("/tmp", "ccc_config_backup.yaml")
+
+    # Get current commit
+    current_commit_result = subprocess.run(
+        ["git", "log", "-1", "--format=%h %s"],
+        cwd=bot_dir,
+        capture_output=True,
+        text=True,
+        timeout=10
+    )
+    current_commit = current_commit_result.stdout.strip() if current_commit_result.returncode == 0 else "unknown"
+
+    await messenger.reply(context, f"Starting self-update...\nCurrent: {current_commit}")
+
+    try:
+        # Backup config.yaml
+        if os.path.exists(config_path):
+            shutil.copy2(config_path, config_backup_path)
+            logger.info(f"Backed up config.yaml to {config_backup_path}")
+
+        # Fetch latest from origin
+        await messenger.reply(context, "Fetching latest code from GitHub...")
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=bot_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if fetch_result.returncode != 0:
+            await messenger.reply(context, f"Failed to fetch: {fetch_result.stderr[:500]}")
+            return
+
+        # Reset to origin/main
+        reset_result = subprocess.run(
+            ["git", "reset", "--hard", "origin/main"],
+            cwd=bot_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if reset_result.returncode != 0:
+            await messenger.reply(context, f"Failed to reset: {reset_result.stderr[:500]}")
+            return
+
+        # Restore config.yaml
+        if os.path.exists(config_backup_path):
+            shutil.copy2(config_backup_path, config_path)
+            logger.info("Restored config.yaml from backup")
+
+        # Reinstall package (in case dependencies changed)
+        await messenger.reply(context, "Reinstalling package...")
+        pip_result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", "."],
+            cwd=bot_dir,
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+
+        if pip_result.returncode != 0:
+            await messenger.reply(context, f"Warning: pip install failed: {pip_result.stderr[:500]}")
+            # Continue anyway, the code update might still work
+
+        # Get new commit
+        new_commit_result = subprocess.run(
+            ["git", "log", "-1", "--format=%h %s"],
+            cwd=bot_dir,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        new_commit = new_commit_result.stdout.strip() if new_commit_result.returncode == 0 else "unknown"
+
+        await messenger.reply(context, f"Update complete! Restarting bot...\nUpdated to: {new_commit}")
+        logger.info(f"Self-update complete ({current_commit} -> {new_commit}), restarting...")
+
+        # Give Lark time to send the message
+        await asyncio.sleep(1)
+
+        # Restart the process
+        os.execv(sys.executable, [sys.executable, "-m", "ccc"] + sys.argv[1:])
+
+    except subprocess.TimeoutExpired:
+        await messenger.reply(context, "Update timed out")
+    except Exception as e:
+        logger.error(f"Error during self-update: {e}")
+        await messenger.reply(context, f"Error during self-update: {str(e)}")
+
+        # Try to restore config if something went wrong
+        if os.path.exists(config_backup_path) and not os.path.exists(config_path):
+            shutil.copy2(config_backup_path, config_path)
+            logger.info("Restored config.yaml after error")
