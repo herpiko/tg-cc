@@ -42,6 +42,46 @@ def is_authorized(event: dict) -> bool:
     return user_authorized and chat_authorized
 
 
+def _extract_text_from_post(content_dict: dict) -> str:
+    """Extract plain text from Lark post/rich-text message format.
+
+    Post format structure:
+    {
+        "title": "...",
+        "content": [
+            [{"tag": "text", "text": "...", ...}, {"tag": "at", ...}],
+            [{"tag": "text", "text": "...", ...}],
+            ...
+        ]
+    }
+
+    Args:
+        content_dict: Parsed JSON content dictionary
+
+    Returns:
+        Extracted plain text with lines joined by newlines
+    """
+    lines = []
+    content_array = content_dict.get("content", [])
+
+    for line_elements in content_array:
+        line_texts = []
+        for element in line_elements:
+            tag = element.get("tag", "")
+            if tag == "text":
+                line_texts.append(element.get("text", ""))
+            elif tag == "at":
+                # Include @mentions as they may contain bot username
+                user_name = element.get("user_name", "")
+                if user_name:
+                    line_texts.append(f"@{user_name}")
+            # Skip other tags like 'a' (links), 'img', etc.
+
+        lines.append("".join(line_texts))
+
+    return "\n".join(lines)
+
+
 def parse_command(text: str) -> tuple:
     """Parse command and arguments from message text.
 
@@ -162,6 +202,7 @@ async def handle_message(messenger, event: dict) -> None:
 
     message = event.get("message", {})
     content = message.get("content", "{}")
+    message_type = message.get("message_type", "")
 
     # Log all message fields to debug
     logger.info(f"Message fields: {list(message.keys())}")
@@ -170,7 +211,13 @@ async def handle_message(messenger, event: dict) -> None:
     import json
     try:
         content_dict = json.loads(content)
-        text = content_dict.get("text", "")
+
+        if message_type == "post":
+            # Post/rich-text format: extract text from nested content array
+            text = _extract_text_from_post(content_dict)
+        else:
+            # Simple text format
+            text = content_dict.get("text", "")
     except json.JSONDecodeError:
         text = content
 

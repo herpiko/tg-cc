@@ -154,16 +154,16 @@ def webhook():
 
                 logger.info(f"Message type: {message_type}, content: {content[:200]}")
 
-                # Check if it's a text message (by message_type or content structure)
-                is_text_message = message_type == "text"
-                if not is_text_message and content:
+                # Check if it's a processable message (text or post/rich-text)
+                is_processable = message_type in ("text", "post")
+                if not is_processable and content:
                     try:
                         content_dict = json.loads(content)
-                        is_text_message = "text" in content_dict
+                        is_processable = "text" in content_dict or "content" in content_dict
                     except (json.JSONDecodeError, TypeError):
                         pass
 
-                if is_text_message:
+                if is_processable:
                     logger.info("Processing as text message")
 
                     # Extract message_id and event_id for deduplication
