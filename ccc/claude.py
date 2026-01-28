@@ -532,6 +532,39 @@ def get_thread_key_lark(chat_id: str, root_id: str = None) -> str:
     return f"lark:{chat_id}:main"
 
 
+def validate_thread_key(thread_key: str) -> tuple[bool, str]:
+    """Validate that a thread key is properly formed.
+
+    Args:
+        thread_key: The thread key to validate
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not thread_key:
+        return False, "Thread key is empty"
+
+    parts = thread_key.split(":")
+    if len(parts) < 3:
+        return False, f"Thread key has invalid format: {thread_key}"
+
+    platform = parts[0]
+    chat_id = parts[1]
+    thread_id = parts[2]
+
+    if platform not in ("telegram", "lark"):
+        return False, f"Unknown platform in thread key: {platform}"
+
+    if not chat_id:
+        return False, "Chat ID is empty in thread key"
+
+    # thread_id can be 'main' or a specific ID, both are valid
+    if not thread_id:
+        return False, "Thread ID is empty in thread key"
+
+    return True, ""
+
+
 def set_thread_worktree(thread_key: str, query_id: str, session_id: str,
                         worktree_path: str, project_workdir: str,
                         project_name: str, project_repo: str):
@@ -540,12 +573,19 @@ def set_thread_worktree(thread_key: str, query_id: str, session_id: str,
     Args:
         thread_key: Unique thread identifier
         query_id: The worktree/query ID
-        session_id: Claude session ID for continuity
+        session_id: Claude session ID for continuity (can be None for initial association)
         worktree_path: Path to the worktree
         project_workdir: Main project working directory
         project_name: Project name
         project_repo: Project repository URL
+
+    Raises:
+        ValueError: If thread_key is invalid
     """
+    is_valid, error = validate_thread_key(thread_key)
+    if not is_valid:
+        raise ValueError(f"Invalid thread key: {error}")
+
     THREAD_WORKTREES[thread_key] = {
         "query_id": query_id,
         "session_id": session_id,
@@ -555,7 +595,7 @@ def set_thread_worktree(thread_key: str, query_id: str, session_id: str,
         "project_repo": project_repo,
         "updated_at": datetime.now()
     }
-    logger.info(f"Associated thread {thread_key} with worktree {query_id}")
+    logger.info(f"Associated thread {thread_key} with worktree {query_id} (session: {session_id})")
 
 
 def get_thread_worktree(thread_key: str) -> dict | None:

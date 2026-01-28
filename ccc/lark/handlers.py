@@ -438,16 +438,33 @@ async def _ask_project(messenger, context: dict, project_name: str, project: dic
     # Store thread context for this project
     messenger.set_thread_context(project_name, context)
 
+    # Get and validate thread key BEFORE creating worktree
+    thread_key = get_thread_key(context)
+    is_valid, error = claude.validate_thread_key(thread_key)
+    if not is_valid:
+        logger.error(f"Invalid thread key for /ask: {error}")
+        await messenger.reply(context, f"Error: Cannot determine thread context. {error}")
+        return
+
     # Generate query ID and create worktree
     query_id = str(uuid.uuid4())[:8]
     worktree_path = await git.create_worktree(messenger, context, project_workdir, project_name, query_id)
     if not worktree_path:
         return
 
-    # Get thread key for context association
-    thread_key = get_thread_key(context)
+    # Associate thread with worktree BEFORE calling Claude
+    try:
+        claude.set_thread_worktree(
+            thread_key, query_id, None,  # session_id is None initially
+            worktree_path, project_workdir, project_name, project_repo
+        )
+        logger.info(f"Pre-registered thread {thread_key} with worktree {query_id}")
+    except ValueError as e:
+        logger.error(f"Failed to associate thread with worktree: {e}")
+        await messenger.reply(context, f"Error: Failed to set up thread context. {str(e)}")
+        return
 
-    await messenger.reply(context, f"Processing for project: {project_name} (query: {query_id})...")
+    await messenger.reply(context, f"Processing for project: {project_name} (query: {query_id}, thread: {thread_key})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
 
@@ -460,7 +477,7 @@ Query: {user_text}
 
 Write the output in {output_file}"""
 
-        logger.info(f"Running query {query_id} for project {project_name}")
+        logger.info(f"Running query {query_id} for project {project_name} in thread {thread_key}")
 
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.ASK_RULES, worktree_path,
@@ -469,11 +486,8 @@ Write the output in {output_file}"""
             keep_worktree=True  # Keep for thread context
         )
 
-        # Store thread-worktree association
-        claude.set_thread_worktree(
-            thread_key, query_id, session_id,
-            worktree_path, project_workdir, project_name, project_repo
-        )
+        # Update thread-worktree association with session_id
+        claude.update_thread_session(thread_key, session_id)
 
         await process_output_file(messenger, context, output_file, duration_minutes)
 
@@ -490,12 +504,31 @@ Write the output in {output_file}"""
 async def _ask_casual(messenger, context: dict, user_text: str, existing_session: str = None) -> None:
     """Handle casual conversation /ask query (no project context)."""
     query_id = str(uuid.uuid4())[:8]
+
+    # Get and validate thread key
     thread_key = get_thread_key(context)
+    is_valid, error = claude.validate_thread_key(thread_key)
+    if not is_valid:
+        logger.error(f"Invalid thread key for casual /ask: {error}")
+        await messenger.reply(context, f"Error: Cannot determine thread context. {error}")
+        return
+
+    # Pre-register thread context BEFORE calling Claude
+    try:
+        claude.set_thread_worktree(
+            thread_key, f"casual-{query_id}", None,  # session_id is None initially
+            None, None, "_casual", None  # No worktree for casual queries
+        )
+        logger.info(f"Pre-registered thread {thread_key} for casual query {query_id}")
+    except ValueError as e:
+        logger.error(f"Failed to set up thread context: {e}")
+        await messenger.reply(context, f"Error: Failed to set up thread context. {str(e)}")
+        return
 
     if existing_session:
-        await messenger.reply(context, f"Continuing casual conversation (query: {query_id})...")
+        await messenger.reply(context, f"Continuing casual conversation (query: {query_id}, thread: {thread_key})...")
     else:
-        await messenger.reply(context, f"Processing casual query (query: {query_id})...")
+        await messenger.reply(context, f"Processing casual query (query: {query_id}, thread: {thread_key})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
 
@@ -509,7 +542,7 @@ Query: {user_text}
 
 IMPORTANT: Write your complete response to the file {output_file}. Use the Write tool to create this file with your response."""
 
-        logger.info(f"Running casual query {query_id}" + (f" (resuming session {existing_session})" if existing_session else ""))
+        logger.info(f"Running casual query {query_id} in thread {thread_key}" + (f" (resuming session {existing_session})" if existing_session else ""))
 
         # Use GENERAL_RULES for casual queries, fall back to empty string
         system_prompt = config.GENERAL_RULES if config.GENERAL_RULES else ""
@@ -521,11 +554,8 @@ IMPORTANT: Write your complete response to the file {output_file}. Use the Write
             query_id=query_id
         )
 
-        # Store thread context for casual conversation continuation
-        claude.set_thread_worktree(
-            thread_key, f"casual-{query_id}", session_id,
-            None, None, "_casual", None  # No worktree for casual queries
-        )
+        # Update thread context with session_id
+        claude.update_thread_session(thread_key, session_id)
 
         # Check if output file exists, provide fallback message if not
         if os.path.exists(output_file):
@@ -642,16 +672,33 @@ async def cmd_feat(messenger, context: dict, args: list) -> None:
     claude.clear_session(project_name)
     messenger.set_thread_context(project_name, context)
 
+    # Get and validate thread key BEFORE creating worktree
+    thread_key = get_thread_key(context)
+    is_valid, error = claude.validate_thread_key(thread_key)
+    if not is_valid:
+        logger.error(f"Invalid thread key for /feat: {error}")
+        await messenger.reply(context, f"Error: Cannot determine thread context. {error}")
+        return
+
     # Generate query ID and create worktree (starts from origin/main)
     query_id = str(uuid.uuid4())[:8]
     worktree_path = await git.create_worktree(messenger, context, project_workdir, project_name, query_id)
     if not worktree_path:
         return
 
-    # Get thread key for context association
-    thread_key = get_thread_key(context)
+    # Associate thread with worktree BEFORE calling Claude
+    try:
+        claude.set_thread_worktree(
+            thread_key, query_id, None,  # session_id is None initially
+            worktree_path, project_workdir, project_name, project_repo
+        )
+        logger.info(f"Pre-registered thread {thread_key} with worktree {query_id}")
+    except ValueError as e:
+        logger.error(f"Failed to associate thread with worktree: {e}")
+        await messenger.reply(context, f"Error: Failed to set up thread context. {str(e)}")
+        return
 
-    await messenger.reply(context, f"Processing for project: {project_name} (query: {query_id})...")
+    await messenger.reply(context, f"Processing for project: {project_name} (query: {query_id}, thread: {thread_key})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
 
@@ -664,7 +711,7 @@ Task: {user_prompt}
 
 Write the output in {output_file}"""
 
-        logger.info(f"Running query {query_id} for project {project_name}")
+        logger.info(f"Running query {query_id} for project {project_name} in thread {thread_key}")
 
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.FEAT_RULES, worktree_path,
@@ -674,11 +721,8 @@ Write the output in {output_file}"""
         )
         claude.set_session(project_name, session_id)
 
-        # Store thread-worktree association
-        claude.set_thread_worktree(
-            thread_key, query_id, session_id,
-            worktree_path, project_workdir, project_name, project_repo
-        )
+        # Update thread-worktree association with session_id
+        claude.update_thread_session(thread_key, session_id)
 
         await process_output_file(messenger, context, output_file, duration_minutes)
 
@@ -719,16 +763,33 @@ async def cmd_fix(messenger, context: dict, args: list) -> None:
     claude.clear_session(project_name)
     messenger.set_thread_context(project_name, context)
 
+    # Get and validate thread key BEFORE creating worktree
+    thread_key = get_thread_key(context)
+    is_valid, error = claude.validate_thread_key(thread_key)
+    if not is_valid:
+        logger.error(f"Invalid thread key for /fix: {error}")
+        await messenger.reply(context, f"Error: Cannot determine thread context. {error}")
+        return
+
     # Generate query ID and create worktree (starts from origin/main)
     query_id = str(uuid.uuid4())[:8]
     worktree_path = await git.create_worktree(messenger, context, project_workdir, project_name, query_id)
     if not worktree_path:
         return
 
-    # Get thread key for context association
-    thread_key = get_thread_key(context)
+    # Associate thread with worktree BEFORE calling Claude
+    try:
+        claude.set_thread_worktree(
+            thread_key, query_id, None,  # session_id is None initially
+            worktree_path, project_workdir, project_name, project_repo
+        )
+        logger.info(f"Pre-registered thread {thread_key} with worktree {query_id}")
+    except ValueError as e:
+        logger.error(f"Failed to associate thread with worktree: {e}")
+        await messenger.reply(context, f"Error: Failed to set up thread context. {str(e)}")
+        return
 
-    await messenger.reply(context, f"Processing for project: {project_name} (query: {query_id})...")
+    await messenger.reply(context, f"Processing for project: {project_name} (query: {query_id}, thread: {thread_key})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
 
@@ -741,7 +802,7 @@ Task: {user_prompt}
 
 Write the output in {output_file}"""
 
-        logger.info(f"Running query {query_id} for project {project_name}")
+        logger.info(f"Running query {query_id} for project {project_name} in thread {thread_key}")
 
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.FIX_RULES, worktree_path,
@@ -751,11 +812,8 @@ Write the output in {output_file}"""
         )
         claude.set_session(project_name, session_id)
 
-        # Store thread-worktree association
-        claude.set_thread_worktree(
-            thread_key, query_id, session_id,
-            worktree_path, project_workdir, project_name, project_repo
-        )
+        # Update thread-worktree association with session_id
+        claude.update_thread_session(thread_key, session_id)
 
         await process_output_file(messenger, context, output_file, duration_minutes)
 
@@ -796,16 +854,33 @@ async def cmd_plan(messenger, context: dict, args: list) -> None:
     claude.clear_session(project_name)
     messenger.set_thread_context(project_name, context)
 
+    # Get and validate thread key BEFORE creating worktree
+    thread_key = get_thread_key(context)
+    is_valid, error = claude.validate_thread_key(thread_key)
+    if not is_valid:
+        logger.error(f"Invalid thread key for /plan: {error}")
+        await messenger.reply(context, f"Error: Cannot determine thread context. {error}")
+        return
+
     # Generate query ID and create worktree (starts from origin/main)
     query_id = str(uuid.uuid4())[:8]
     worktree_path = await git.create_worktree(messenger, context, project_workdir, project_name, query_id)
     if not worktree_path:
         return
 
-    # Get thread key for context association
-    thread_key = get_thread_key(context)
+    # Associate thread with worktree BEFORE calling Claude
+    try:
+        claude.set_thread_worktree(
+            thread_key, query_id, None,  # session_id is None initially
+            worktree_path, project_workdir, project_name, project_repo
+        )
+        logger.info(f"Pre-registered thread {thread_key} with worktree {query_id}")
+    except ValueError as e:
+        logger.error(f"Failed to associate thread with worktree: {e}")
+        await messenger.reply(context, f"Error: Failed to set up thread context. {str(e)}")
+        return
 
-    await messenger.reply(context, f"Planning for project: {project_name} (query: {query_id})...")
+    await messenger.reply(context, f"Planning for project: {project_name} (query: {query_id}, thread: {thread_key})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
 
@@ -818,7 +893,7 @@ Task: {user_prompt}
 
 Write the output in {output_file}"""
 
-        logger.info(f"Running query {query_id} for project {project_name}")
+        logger.info(f"Running query {query_id} for project {project_name} in thread {thread_key}")
 
         duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.PLAN_RULES, worktree_path,
@@ -828,11 +903,8 @@ Write the output in {output_file}"""
         )
         claude.set_session(project_name, session_id)
 
-        # Store thread-worktree association
-        claude.set_thread_worktree(
-            thread_key, query_id, session_id,
-            worktree_path, project_workdir, project_name, project_repo
-        )
+        # Update thread-worktree association with session_id
+        claude.update_thread_session(thread_key, session_id)
 
         await process_output_file(messenger, context, output_file, duration_minutes)
 
