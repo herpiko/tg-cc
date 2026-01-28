@@ -779,6 +779,13 @@ Write the output in {output_file}"""
 
         await process_output_file(messenger, context, output_file, duration_minutes)
 
+        # Auto spin-up project on the current branch if configured
+        project_up = project.get('project_up')
+        if project_up:
+            project_endpoint_url = project.get('project_endpoint_url')
+            project_ports = project.get('project_ports')
+            await process.spin_up_project(messenger, context, project_name, worktree_path, project_up, project_endpoint_url, project_ports)
+
     except asyncio.CancelledError:
         logger.info(f"Query {query_id} for project {project_name} was cancelled")
         await messenger.reply(context, f"Query {query_id} for {project_name} was cancelled.")
@@ -870,6 +877,13 @@ Write the output in {output_file}"""
 
         await process_output_file(messenger, context, output_file, duration_minutes)
 
+        # Auto spin-up project on the current branch if configured
+        project_up = project.get('project_up')
+        if project_up:
+            project_endpoint_url = project.get('project_endpoint_url')
+            project_ports = project.get('project_ports')
+            await process.spin_up_project(messenger, context, project_name, worktree_path, project_up, project_endpoint_url, project_ports)
+
     except asyncio.CancelledError:
         logger.info(f"Query {query_id} for project {project_name} was cancelled")
         await messenger.reply(context, f"Query {query_id} for {project_name} was cancelled.")
@@ -960,6 +974,13 @@ Write the output in {output_file}"""
         claude.update_thread_session(thread_key, session_id)
 
         await process_output_file(messenger, context, output_file, duration_minutes)
+
+        # Auto spin-up project on the current branch if configured
+        project_up = project.get('project_up')
+        if project_up:
+            project_endpoint_url = project.get('project_endpoint_url')
+            project_ports = project.get('project_ports')
+            await process.spin_up_project(messenger, context, project_name, worktree_path, project_up, project_endpoint_url, project_ports)
 
     except asyncio.CancelledError:
         logger.info(f"Query {query_id} for project {project_name} was cancelled")
