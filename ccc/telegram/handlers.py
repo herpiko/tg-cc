@@ -998,9 +998,10 @@ async def cmd_init(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /up command. Format: /up [project-name]
+    """Handle /up command. Format: /up [project-name] [branch]
 
     If project-name is not provided, uses the project from thread context.
+    If branch is not provided, uses main branch.
     """
     messenger = get_messenger()
 
@@ -1016,9 +1017,10 @@ async def cmd_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     logger.info("Received /up command")
 
-    # Get project name from args or thread context
+    # Get project name and branch from args or thread context
     project_name = None
     project = None
+    branch = "main"  # Default branch
 
     if context.args and len(context.args) >= 1:
         project_name = context.args[0]
@@ -1026,6 +1028,9 @@ async def cmd_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not project:
             await reply(update, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
             return
+        # Check for optional branch parameter
+        if len(context.args) >= 2:
+            branch = context.args[1]
     else:
         # Try to get project from thread context with fallback
         thread_key, worktree_info = get_thread_key_with_fallback(update)
@@ -1034,7 +1039,7 @@ async def cmd_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             project = config.get_project(project_name)
 
     if not project_name or not project:
-        await reply(update, "Usage: /up [project-name]\n\nNo project specified and no project context in this thread.")
+        await reply(update, "Usage: /up <project-name> [branch]\n\nNo project specified and no project context in this thread.")
         return
 
     project_workdir = project['project_workdir']
@@ -1057,8 +1062,9 @@ async def cmd_up(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             claude.clear_thread_worktree(existing_key)
             logger.info(f"Cleared old thread association {existing_key} for project {project_name}")
 
-    # Clean up workdir and pull from main before spinning up
-    if not await git.refresh_to_main_branch(messenger, update, project_workdir):
+    # Clean up workdir and pull from specified branch before spinning up
+    await reply(update, f"Switching to branch: {branch}...")
+    if not await git.refresh_to_main_branch(messenger, update, project_workdir, branch):
         return
 
     await process.spin_up_project(messenger, update, project_name, project_workdir, project_up, project_endpoint_url, project_ports)
@@ -1580,9 +1586,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /init <project-name>
   Initialize CLAUDE.md for a project and spin up if project_up is configured
 
-/up [project-name]
+/up <project-name> [branch]
   Spin up a project using project_up command
-  Without project-name: uses thread context
+  Without branch: uses main branch
+  Example: /up myproject feat-123
 
 /stop [project-name]
   Stop a running project

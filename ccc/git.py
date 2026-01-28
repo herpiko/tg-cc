@@ -56,17 +56,33 @@ async def clone_repository_if_needed(messenger: Messenger, context: Any, project
         return False
 
 
-async def refresh_to_main_branch(messenger: Messenger, context: Any, project_workdir: str) -> bool:
-    """Reset to main branch and pull latest changes.
+async def refresh_to_main_branch(messenger: Messenger, context: Any, project_workdir: str, branch: str = "main") -> bool:
+    """Reset to specified branch and pull latest changes.
 
     Args:
         messenger: Platform-specific messenger for sending replies
         context: Platform-specific context (Telegram update, Lark message dict, etc.)
         project_workdir: Working directory for the project
+        branch: Branch name to checkout (default: "main")
     """
-    logger.info(f"Preparing fresh main branch")
+    logger.info(f"Preparing fresh {branch} branch")
 
     try:
+        # Fetch all branches first
+        logger.info("Fetching from origin")
+
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=project_workdir,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+
+        if fetch_result.returncode != 0:
+            logger.error(f"git fetch failed: {fetch_result.stderr}")
+            await messenger.reply(context, f"Warning: Could not fetch from origin:\n{fetch_result.stderr[:500]}")
+
         # Clean up the branch - reset any uncommitted changes
         logger.info("Cleaning up branch")
 
@@ -94,11 +110,11 @@ async def refresh_to_main_branch(messenger: Messenger, context: Any, project_wor
         if clean_result.returncode != 0:
             logger.error(f"git clean failed: {clean_result.stderr}")
 
-        # Checkout to main branch
-        logger.info("Checking out main branch")
+        # Checkout to specified branch
+        logger.info(f"Checking out {branch} branch")
 
         checkout_result = subprocess.run(
-            ["git", "checkout", "main"],
+            ["git", "checkout", branch],
             cwd=project_workdir,
             capture_output=True,
             text=True,
@@ -106,14 +122,15 @@ async def refresh_to_main_branch(messenger: Messenger, context: Any, project_wor
         )
 
         if checkout_result.returncode != 0:
-            logger.error(f"git checkout main failed: {checkout_result.stderr}")
-            await messenger.reply(context, f"Warning: Could not checkout main:\n{checkout_result.stderr[:500]}")
+            logger.error(f"git checkout {branch} failed: {checkout_result.stderr}")
+            await messenger.reply(context, f"Error: Could not checkout {branch}:\n{checkout_result.stderr[:500]}")
+            return False
 
-        # Pull latest from main
-        logger.info("Pulling from origin/main")
+        # Pull latest from origin/branch
+        logger.info(f"Pulling from origin/{branch}")
 
         pull_result = subprocess.run(
-            ["git", "pull", "origin", "main"],
+            ["git", "pull", "origin", branch],
             cwd=project_workdir,
             capture_output=True,
             text=True,
@@ -122,13 +139,13 @@ async def refresh_to_main_branch(messenger: Messenger, context: Any, project_wor
 
         if pull_result.returncode != 0:
             logger.error(f"git pull failed: {pull_result.stderr}")
-            await messenger.reply(context, f"Warning: Could not pull from main:\n{pull_result.stderr[:500]}")
+            await messenger.reply(context, f"Warning: Could not pull from {branch}:\n{pull_result.stderr[:500]}")
 
         return True
 
     except Exception as e:
-        logger.error(f"Error refreshing to main branch")
-        await messenger.reply(context, f"Error refreshing to main branch: {str(e)}")
+        logger.error(f"Error refreshing to {branch} branch: {e}")
+        await messenger.reply(context, f"Error refreshing to {branch} branch: {str(e)}")
         return False
 
 

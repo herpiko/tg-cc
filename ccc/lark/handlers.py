@@ -419,9 +419,10 @@ async def cmd_help(messenger, context: dict, args: list) -> None:
 /init <project-name>
   Initialize CLAUDE.md for a project
 
-/up [project-name]
+/up <project-name> [branch]
   Spin up a project using project_up command
-  Without project-name: uses thread context
+  Without branch: uses main branch
+  Example: /up myproject feat-123
 
 /stop [project-name]
   Stop a running project
@@ -1156,13 +1157,15 @@ async def cmd_init(messenger, context: dict, args: list) -> None:
 
 
 async def cmd_up(messenger, context: dict, args: list) -> None:
-    """Handle /up command. Format: /up [project-name]
+    """Handle /up command. Format: /up [project-name] [branch]
 
     If project-name is not provided, uses the project from thread context.
+    If branch is not provided, uses main branch.
     """
-    # Get project name from args or thread context
+    # Get project name and branch from args or thread context
     project_name = None
     project = None
+    branch = "main"  # Default branch
 
     if args and len(args) >= 1:
         project_name = args[0]
@@ -1170,6 +1173,9 @@ async def cmd_up(messenger, context: dict, args: list) -> None:
         if not project:
             await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
             return
+        # Check for optional branch parameter
+        if len(args) >= 2:
+            branch = args[1]
     else:
         # Try to get project from thread context with fallback
         thread_key, worktree_info = get_thread_key_with_fallback(context)
@@ -1178,7 +1184,7 @@ async def cmd_up(messenger, context: dict, args: list) -> None:
             project = config.get_project(project_name)
 
     if not project_name or not project:
-        await messenger.reply(context, "Usage: /up [project-name]\n\nNo project specified and no project context in this thread.")
+        await messenger.reply(context, "Usage: /up <project-name> [branch]\n\nNo project specified and no project context in this thread.")
         return
 
     project_workdir = project['project_workdir']
@@ -1200,8 +1206,9 @@ async def cmd_up(messenger, context: dict, args: list) -> None:
             claude.clear_thread_worktree(existing_key)
             logger.info(f"Cleared old thread association {existing_key} for project {project_name}")
 
-    # Clean up workdir and pull from main before spinning up
-    if not await git.refresh_to_main_branch(messenger, context, project_workdir):
+    # Clean up workdir and pull from specified branch before spinning up
+    await messenger.reply(context, f"Switching to branch: {branch}...")
+    if not await git.refresh_to_main_branch(messenger, context, project_workdir, branch):
         return
 
     await process.spin_up_project(messenger, context, project_name, project_workdir, project_up, project_endpoint_url, project_ports)
