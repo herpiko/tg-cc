@@ -71,6 +71,44 @@ def get_thread_key(context: dict) -> str:
     return claude.get_thread_key_lark(chat_id, root_id)
 
 
+def get_thread_key_with_fallback(context: dict) -> tuple[str, dict | None]:
+    """Get the thread key and try to find worktree context with fallback.
+
+    Returns:
+        Tuple of (thread_key, worktree_info or None)
+    """
+    chat_id = context.get("chat_id", "")
+    root_id = context.get("root_id")
+
+    # Primary: try with root_id
+    primary_key = claude.get_thread_key_lark(chat_id, root_id)
+    worktree_info = claude.get_thread_worktree(primary_key)
+
+    if worktree_info:
+        logger.info(f"Found thread context for key {primary_key}")
+        return primary_key, worktree_info
+
+    # Fallback 1: If we have a root_id, try the 'main' key for the same chat
+    if root_id:
+        fallback_key = claude.get_thread_key_lark(chat_id, None)
+        worktree_info = claude.get_thread_worktree(fallback_key)
+        if worktree_info:
+            logger.info(f"Found thread context using fallback key {fallback_key}")
+            return fallback_key, worktree_info
+
+    # Fallback 2: If we don't have a root_id, search for any thread in this chat
+    if not root_id:
+        all_worktrees = claude.get_all_thread_worktrees()
+        chat_prefix = f"lark:{chat_id}:"
+        for key, info in all_worktrees.items():
+            if key.startswith(chat_prefix):
+                logger.info(f"Found thread context for chat using key {key}")
+                return key, info
+
+    logger.info(f"No thread context found for key {primary_key}")
+    return primary_key, None
+
+
 async def process_output_file(messenger, context: dict, output_file: str, duration_minutes: float):
     """Process output file and send to user with cleanup."""
     if os.path.exists(output_file):
@@ -157,8 +195,7 @@ async def handle_message(messenger, event: dict) -> None:
 
         if text_without_mention:
             # Check if this thread has an active worktree context
-            thread_key = get_thread_key(context)
-            worktree_info = claude.get_thread_worktree(thread_key)
+            thread_key, worktree_info = get_thread_key_with_fallback(context)
 
             if worktree_info:
                 # Continue conversation in the worktree context
@@ -819,8 +856,7 @@ async def cmd_feedback(messenger, context: dict, args: list) -> None:
         return
 
     # Try to determine project from args or thread context
-    thread_key = get_thread_key(context)
-    worktree_info = claude.get_thread_worktree(thread_key)
+    thread_key, worktree_info = get_thread_key_with_fallback(context)
 
     project_name = None
     project = None
@@ -1011,9 +1047,8 @@ async def cmd_up(messenger, context: dict, args: list) -> None:
             await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
             return
     else:
-        # Try to get project from thread context
-        thread_key = get_thread_key(context)
-        worktree_info = claude.get_thread_worktree(thread_key)
+        # Try to get project from thread context with fallback
+        thread_key, worktree_info = get_thread_key_with_fallback(context)
         if worktree_info:
             project_name = worktree_info.get("project_name")
             project = config.get_project(project_name)
@@ -1069,9 +1104,8 @@ async def cmd_stop(messenger, context: dict, args: list) -> None:
             await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
             return
     else:
-        # Try to get project from thread context
-        thread_key = get_thread_key(context)
-        worktree_info = claude.get_thread_worktree(thread_key)
+        # Try to get project from thread context with fallback
+        thread_key, worktree_info = get_thread_key_with_fallback(context)
         if worktree_info:
             project_name = worktree_info.get("project_name")
 
@@ -1161,6 +1195,9 @@ async def cmd_cancel(messenger, context: dict, args: list) -> None:
     project_name = None
     query_id = None
 
+    # Get thread context with fallback once
+    thread_key, worktree_info = get_thread_key_with_fallback(context)
+
     if args and len(args) >= 1:
         # Check if first arg is a project name or query ID
         potential_project = args[0]
@@ -1169,8 +1206,6 @@ async def cmd_cancel(messenger, context: dict, args: list) -> None:
             query_id = args[1] if len(args) > 1 else None
         else:
             # First arg might be a query ID if thread has context
-            thread_key = get_thread_key(context)
-            worktree_info = claude.get_thread_worktree(thread_key)
             if worktree_info:
                 project_name = worktree_info.get("project_name")
                 query_id = potential_project  # Treat first arg as query ID
@@ -1178,9 +1213,7 @@ async def cmd_cancel(messenger, context: dict, args: list) -> None:
                 await messenger.reply(context, f"Project '{potential_project}' not found. Available projects: {config.get_available_projects()}")
                 return
     else:
-        # No args - try thread context first
-        thread_key = get_thread_key(context)
-        worktree_info = claude.get_thread_worktree(thread_key)
+        # No args - try thread context
         if worktree_info:
             project_name = worktree_info.get("project_name")
             query_id = worktree_info.get("query_id")
@@ -1256,10 +1289,9 @@ async def cmd_log(messenger, context: dict, args: list) -> None:
                 await messenger.reply(context, f"Project '{first_arg}' not found. Available projects: {config.get_available_projects()}")
                 return
 
-    # If no project name, try thread context
+    # If no project name, try thread context with fallback
     if not project_name:
-        thread_key = get_thread_key(context)
-        worktree_info = claude.get_thread_worktree(thread_key)
+        thread_key, worktree_info = get_thread_key_with_fallback(context)
         if worktree_info:
             project_name = worktree_info.get("project_name")
 
