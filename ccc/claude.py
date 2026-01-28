@@ -33,6 +33,10 @@ RUNNING_QUERIES = {}
 # Completed jobs storage for feedback: {query_id: {"session_id": str, "worktree_path": str, "project_workdir": str, "project_name": str, "command": str, "completed_at": datetime}}
 COMPLETED_JOBS = {}
 
+# Thread-to-worktree mapping: {thread_key: {"query_id": str, "session_id": str, "worktree_path": str, "project_workdir": str, "project_name": str, "project_repo": str}}
+# thread_key format: "telegram:{chat_id}:{thread_id}" or "lark:{chat_id}:{root_id}"
+THREAD_WORKTREES = {}
+
 
 async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: str = None, project_name: str = None, command: str = None, user_prompt: str = None, worktree_path: str = None, project_workdir: str = None, query_id: str = None, keep_worktree: bool = False) -> tuple:
     """Execute Claude query using SDK and return (duration_minutes, session_id).
@@ -510,3 +514,90 @@ def cleanup_old_completed_jobs(max_age_hours: int = 24):
 
     if jobs_to_remove:
         logger.info(f"Cleaned up {len(jobs_to_remove)} old completed jobs")
+
+
+# Thread-to-worktree functions
+
+def get_thread_key_telegram(chat_id: str, thread_id: str = None) -> str:
+    """Generate a thread key for Telegram context."""
+    if thread_id:
+        return f"telegram:{chat_id}:{thread_id}"
+    return f"telegram:{chat_id}:main"
+
+
+def get_thread_key_lark(chat_id: str, root_id: str = None) -> str:
+    """Generate a thread key for Lark context."""
+    if root_id:
+        return f"lark:{chat_id}:{root_id}"
+    return f"lark:{chat_id}:main"
+
+
+def set_thread_worktree(thread_key: str, query_id: str, session_id: str,
+                        worktree_path: str, project_workdir: str,
+                        project_name: str, project_repo: str):
+    """Associate a thread with a worktree context.
+
+    Args:
+        thread_key: Unique thread identifier
+        query_id: The worktree/query ID
+        session_id: Claude session ID for continuity
+        worktree_path: Path to the worktree
+        project_workdir: Main project working directory
+        project_name: Project name
+        project_repo: Project repository URL
+    """
+    THREAD_WORKTREES[thread_key] = {
+        "query_id": query_id,
+        "session_id": session_id,
+        "worktree_path": worktree_path,
+        "project_workdir": project_workdir,
+        "project_name": project_name,
+        "project_repo": project_repo,
+        "updated_at": datetime.now()
+    }
+    logger.info(f"Associated thread {thread_key} with worktree {query_id}")
+
+
+def get_thread_worktree(thread_key: str) -> dict | None:
+    """Get worktree context for a thread.
+
+    Args:
+        thread_key: Unique thread identifier
+
+    Returns:
+        Dict with worktree info or None if not found
+    """
+    return THREAD_WORKTREES.get(thread_key)
+
+
+def update_thread_session(thread_key: str, session_id: str):
+    """Update the session ID for a thread's worktree context.
+
+    Args:
+        thread_key: Unique thread identifier
+        session_id: New Claude session ID
+    """
+    if thread_key in THREAD_WORKTREES:
+        THREAD_WORKTREES[thread_key]["session_id"] = session_id
+        THREAD_WORKTREES[thread_key]["updated_at"] = datetime.now()
+        logger.info(f"Updated session for thread {thread_key} to {session_id}")
+
+
+def clear_thread_worktree(thread_key: str):
+    """Clear the worktree association for a thread.
+
+    Args:
+        thread_key: Unique thread identifier
+    """
+    if thread_key in THREAD_WORKTREES:
+        del THREAD_WORKTREES[thread_key]
+        logger.info(f"Cleared worktree association for thread {thread_key}")
+
+
+def get_all_thread_worktrees() -> dict:
+    """Get all thread-to-worktree mappings.
+
+    Returns:
+        Dict of {thread_key: worktree_info}
+    """
+    return THREAD_WORKTREES.copy()

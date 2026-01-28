@@ -9,6 +9,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters
 
 from ccc import config
+from ccc import process
 from ccc.telegram import handlers
 from ccc.telegram.messenger import TelegramMessenger
 
@@ -49,6 +50,34 @@ async def send_startup_messages(application: Application) -> None:
             logger.error(f"Failed to send startup message to group {group_id}: {e}")
 
 
+async def startup_projects_and_notify(application: Application) -> None:
+    """Start all configured projects and send summary to authorized groups."""
+    logger.info("Auto-starting configured projects...")
+
+    # Start all projects
+    results = await process.startup_all_projects()
+
+    if not results:
+        logger.info("No projects with project_up configured for auto-start")
+        return
+
+    # Format summary
+    summary = process.format_startup_summary(results)
+    logger.info(summary)
+
+    # Send summary to all authorized groups
+    for group_id in config.get_telegram_authorized_group_ids():
+        try:
+            thread_id = config.get_telegram_thread_id(group_id)
+            await application.bot.send_message(
+                chat_id=group_id,
+                text=summary,
+                message_thread_id=thread_id
+            )
+        except Exception as e:
+            logger.error(f"Failed to send startup summary to group {group_id}: {e}")
+
+
 async def send_shutdown_messages(application: Application) -> None:
     """Send shutdown notification to all authorized groups."""
     logger.info("Sending shutdown notifications to authorized groups...")
@@ -80,6 +109,7 @@ def run(config_path: str = None):
 
     # Register command handlers
     application.add_handler(CommandHandler("help", handlers.cmd_help))
+    application.add_handler(CommandHandler("list", handlers.cmd_list))
     application.add_handler(CommandHandler("ask", handlers.cmd_ask))
     application.add_handler(CommandHandler("feat", handlers.cmd_feat))
     application.add_handler(CommandHandler("fix", handlers.cmd_fix))
@@ -88,9 +118,11 @@ def run(config_path: str = None):
     application.add_handler(CommandHandler("init", handlers.cmd_init))
     application.add_handler(CommandHandler("up", handlers.cmd_up))
     application.add_handler(CommandHandler("stop", handlers.cmd_stop))
+    application.add_handler(CommandHandler("down", handlers.cmd_down))
     application.add_handler(CommandHandler("status", handlers.cmd_status))
     application.add_handler(CommandHandler("cancel", handlers.cmd_cancel))
     application.add_handler(CommandHandler("log", handlers.cmd_log))
+    application.add_handler(CommandHandler("cleanup", handlers.cmd_cleanup))
     application.add_handler(CommandHandler("cost", handlers.cmd_cost))
     application.add_handler(CommandHandler("selfupdate", handlers.cmd_selfupdate))
 
@@ -114,6 +146,9 @@ def run(config_path: str = None):
 
             # Send startup messages after application is ready
             await send_startup_messages(application)
+
+            # Auto-start all configured projects
+            await startup_projects_and_notify(application)
 
             # Wait for stop signal
             stop_event = asyncio.Event()

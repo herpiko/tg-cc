@@ -9,6 +9,7 @@ import os
 from flask import Flask, request, jsonify
 
 from ccc import config
+from ccc import process
 from ccc.lark.messenger import LarkMessenger
 from ccc.lark import handlers
 from ccc.lark import dedup
@@ -242,6 +243,29 @@ def run(config_path: str = None):
 
         # Clean up old dedup entries on startup
         dedup.cleanup_old_entries()
+
+        # Auto-start all configured projects
+        logger.info("Auto-starting configured projects...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            results = loop.run_until_complete(process.startup_all_projects())
+            if results:
+                summary = process.format_startup_summary(results)
+                logger.info(summary)
+                # Send summary to all authorized chats
+                for chat_id in config.LARK_AUTHORIZED_CHATS:
+                    try:
+                        # Use reply with just chat_id in context to send direct message
+                        loop.run_until_complete(messenger.reply({"chat_id": chat_id}, summary))
+                    except Exception as e:
+                        logger.error(f"Failed to send startup summary to chat {chat_id}: {e}")
+            else:
+                logger.info("No projects with project_up configured for auto-start")
+        except Exception as e:
+            logger.error(f"Error during project auto-start: {e}")
+        finally:
+            loop.close()
 
         logger.info(f"Lark bot is starting on port {config.LARK_WEBHOOK_PORT}...")
         logger.info("Listening for webhook events...")

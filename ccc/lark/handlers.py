@@ -64,6 +64,13 @@ def parse_command(text: str) -> tuple:
     return command, args
 
 
+def get_thread_key(context: dict) -> str:
+    """Get the thread key for this Lark context."""
+    chat_id = context.get("chat_id", "")
+    root_id = context.get("root_id")
+    return claude.get_thread_key_lark(chat_id, root_id)
+
+
 async def process_output_file(messenger, context: dict, output_file: str, duration_minutes: float):
     """Process output file and send to user with cleanup."""
     if os.path.exists(output_file):
@@ -143,8 +150,26 @@ async def handle_message(messenger, event: dict) -> None:
     command, args = parse_command(text)
 
     if not command:
-        # Not a command, ignore or handle mentions differently
-        logger.info("Message is not a command, ignoring")
+        # Not a command - check if bot is mentioned in a thread with worktree context
+        import re
+        # Remove @mentions and check if there's remaining text
+        text_without_mention = re.sub(r'@\S+\s*', '', text).strip()
+
+        if text_without_mention:
+            # Check if this thread has an active worktree context
+            thread_key = get_thread_key(context)
+            worktree_info = claude.get_thread_worktree(thread_key)
+
+            if worktree_info:
+                # Continue conversation in the worktree context
+                await _continue_in_worktree(messenger, context, text_without_mention, worktree_info, thread_key)
+                return
+            else:
+                # No worktree context, treat as casual conversation
+                await _ask_casual(messenger, context, text_without_mention)
+                return
+
+        logger.info("Message is not a command and has no content, ignoring")
         return
 
     logger.info(f"Received command: /{command} with args: {args}")
@@ -152,6 +177,8 @@ async def handle_message(messenger, event: dict) -> None:
     # Route to appropriate handler
     handlers = {
         "help": cmd_help,
+        "list": cmd_list,
+        "cleanup": cmd_cleanup,
         "ask": cmd_ask,
         "feat": cmd_feat,
         "fix": cmd_fix,
@@ -160,6 +187,7 @@ async def handle_message(messenger, event: dict) -> None:
         "init": cmd_init,
         "up": cmd_up,
         "stop": cmd_stop,
+        "down": cmd_down,
         "status": cmd_status,
         "cancel": cmd_cancel,
         "log": cmd_log,
@@ -172,6 +200,109 @@ async def handle_message(messenger, event: dict) -> None:
         await messenger.reply(context, f"Unknown command: /{command}. Use /help for available commands.")
 
 
+async def cmd_cleanup(messenger, context: dict, args: list) -> None:
+    """Handle /cleanup command. Clean up orphan worktrees."""
+    import shutil
+
+    logger.info("Received /cleanup command")
+
+    # Get all active worktree IDs (running queries + completed jobs + thread worktrees)
+    active_ids = set()
+
+    # Add running query IDs
+    running_queries = claude.get_all_running_queries()
+    for project_name, queries in running_queries.items():
+        for query_id in queries.keys():
+            active_ids.add(query_id)
+
+    # Add completed job IDs
+    for job_id in claude.COMPLETED_JOBS.keys():
+        active_ids.add(job_id)
+
+    # Add thread-worktree IDs
+    for thread_key, info in claude.get_all_thread_worktrees().items():
+        active_ids.add(info.get("query_id"))
+
+    logger.info(f"Active worktree IDs to preserve: {active_ids}")
+
+    # Scan worktree base directory for orphan worktrees
+    worktree_base = config.WORKTREE_BASE
+    if not os.path.exists(worktree_base):
+        await messenger.reply(context, "No worktrees directory found. Nothing to clean up.")
+        return
+
+    cleaned = []
+    errors = []
+
+    for project_dir in os.listdir(worktree_base):
+        project_path = os.path.join(worktree_base, project_dir)
+        if not os.path.isdir(project_path):
+            continue
+
+        # Get the project's main workdir for git worktree commands
+        project = config.get_project(project_dir)
+        project_workdir = project['project_workdir'] if project else None
+
+        for worktree_id in os.listdir(project_path):
+            worktree_path = os.path.join(project_path, worktree_id)
+            if not os.path.isdir(worktree_path):
+                continue
+
+            # Check if this worktree is active
+            if worktree_id not in active_ids:
+                logger.info(f"Cleaning up orphan worktree: {worktree_path}")
+                try:
+                    if project_workdir:
+                        git.cleanup_worktree(project_workdir, worktree_path)
+                    else:
+                        # Fallback: just remove the directory
+                        shutil.rmtree(worktree_path, ignore_errors=True)
+                    cleaned.append(f"{project_dir}/{worktree_id}")
+                except Exception as e:
+                    logger.error(f"Error cleaning up {worktree_path}: {e}")
+                    errors.append(f"{project_dir}/{worktree_id}: {str(e)[:50]}")
+
+    # Build response
+    lines = []
+    if cleaned:
+        lines.append(f"Cleaned up {len(cleaned)} orphan worktree(s):")
+        for item in cleaned:
+            lines.append(f"  - {item}")
+    else:
+        lines.append("No orphan worktrees found.")
+
+    if errors:
+        lines.append(f"\nErrors ({len(errors)}):")
+        for err in errors:
+            lines.append(f"  - {err}")
+
+    await messenger.reply(context, "\n".join(lines))
+
+
+async def cmd_list(messenger, context: dict, args: list) -> None:
+    """Handle /list command. Display registered projects."""
+    logger.info("Received /list command")
+
+    if not config.PROJECTS:
+        await messenger.reply(context, "No projects configured.")
+        return
+
+    lines = ["Registered projects:\n"]
+    for project in config.PROJECTS:
+        name = project.get('project_name', '?')
+        repo = project.get('project_repo', '?')
+        workdir = project.get('project_workdir', '?')
+        has_up = "Yes" if project.get('project_up') else "No"
+
+        lines.append(f"**{name}**")
+        lines.append(f"  Repo: {repo}")
+        lines.append(f"  Workdir: {workdir}")
+        lines.append(f"  Has project_up: {has_up}")
+        lines.append("")
+
+    await messenger.reply(context, "\n".join(lines))
+
+
 async def cmd_help(messenger, context: dict, args: list) -> None:
     """Handle /help command."""
     help_text = """Available commands:
@@ -179,8 +310,11 @@ async def cmd_help(messenger, context: dict, args: list) -> None:
 /help
   Show this help message
 
-/ask <project-name> <query>
-  Ask a question about a project
+/list
+  List all registered projects
+
+/ask [project-name] <query>
+  Ask a question (with project-name: about that project, without: casual chat)
 
 /feat <project-name> <task>
   Implement a new feature (creates new branch, commits, and opens MR)
@@ -191,47 +325,70 @@ async def cmd_help(messenger, context: dict, args: list) -> None:
 /plan <project-name> <task>
   Plan and explore a task (creates new branch)
 
-/feedback <project-name> [job-id] <feedback>
+/feedback [project-name] [job-id] <feedback>
   Continue work with context from previous command
-  Optional: specify job-id to continue a specific job (see /status)
+  Without project-name: uses thread context
+  Optional job-id: continue a specific job (see /status)
 
 /init <project-name>
   Initialize CLAUDE.md for a project
 
-/up <project-name>
+/up [project-name]
   Spin up a project using project_up command
+  Without project-name: uses thread context
 
-/stop <project-name>
+/stop [project-name]
   Stop a running project
+  Without project-name: uses thread context
+
+/down [project-name]
+  Alias for /stop - stop a running project
 
 /status
   Show running projects
 
 /cancel [project-name] [query-id]
-  Cancel running Claude queries. Without args: cancel all.
-  With project: cancel all for that project.
-  With project + id: cancel specific query.
+  Cancel running Claude queries
+  Without args: uses thread context, or cancel all if no context
+  With project: cancel all for that project
 
-/log <project-name> [lines]
-  Show last N lines of project logs (default: 50)"""
+/log [project-name] [lines]
+  Show last N lines of project logs (default: 50)
+  Without project-name: uses thread context
+
+/cleanup
+  Clean up orphan worktrees (those without running/completed jobs)"""
 
     await messenger.reply(context, help_text)
 
 
 async def cmd_ask(messenger, context: dict, args: list) -> None:
-    """Handle /ask command. Format: /ask project-name query"""
-    if len(args) < 2:
-        await messenger.reply(context, "Usage: /ask project-name query")
+    """Handle /ask command. Format: /ask [project-name] query
+
+    If project-name is provided and exists, ask about that project.
+    Otherwise, treat as casual conversation with the agent.
+    """
+    if len(args) < 1:
+        await messenger.reply(context, "Usage: /ask [project-name] query\n\nWith project-name: Ask about a specific project\nWithout project-name: Casual conversation with the agent")
         return
 
-    project_name = args[0]
-    user_text = " ".join(args[1:])
+    # Check if first arg is a project name
+    potential_project = args[0]
+    project = config.get_project(potential_project)
 
-    project = config.get_project(project_name)
-    if not project:
-        await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
-        return
+    if project and len(args) >= 2:
+        # Project-specific query
+        project_name = potential_project
+        user_text = " ".join(args[1:])
+        await _ask_project(messenger, context, project_name, project, user_text)
+    else:
+        # Casual conversation (no project context)
+        user_text = " ".join(args)
+        await _ask_casual(messenger, context, user_text)
 
+
+async def _ask_project(messenger, context: dict, project_name: str, project: dict, user_text: str) -> None:
+    """Handle project-specific /ask query."""
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
@@ -250,6 +407,9 @@ async def cmd_ask(messenger, context: dict, args: list) -> None:
     if not worktree_path:
         return
 
+    # Get thread key for context association
+    thread_key = get_thread_key(context)
+
     await messenger.reply(context, f"Processing for project: {project_name} (query: {query_id})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
@@ -265,11 +425,19 @@ Write the output in {output_file}"""
 
         logger.info(f"Running query {query_id} for project {project_name}")
 
-        duration_minutes, _ = await claude.run_claude_query(
+        duration_minutes, session_id = await claude.run_claude_query(
             prompt, config.ASK_RULES, worktree_path,
             project_name=project_name, command="ask", user_prompt=user_text,
-            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True  # Keep for thread context
         )
+
+        # Store thread-worktree association
+        claude.set_thread_worktree(
+            thread_key, query_id, session_id,
+            worktree_path, project_workdir, project_name, project_repo
+        )
+
         await process_output_file(messenger, context, output_file, duration_minutes)
 
     except asyncio.CancelledError:
@@ -278,6 +446,134 @@ Write the output in {output_file}"""
         cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running query: {e}")
+        await messenger.reply(context, f"Error: {str(e)}")
+        cleanup_output_file(output_file)
+
+
+async def _ask_casual(messenger, context: dict, user_text: str, existing_session: str = None) -> None:
+    """Handle casual conversation /ask query (no project context)."""
+    query_id = str(uuid.uuid4())[:8]
+    thread_key = get_thread_key(context)
+
+    if existing_session:
+        await messenger.reply(context, f"Continuing casual conversation (query: {query_id})...")
+    else:
+        await messenger.reply(context, f"Processing casual query (query: {query_id})...")
+
+    output_file = f"/tmp/output_{query_id}.txt"
+
+    # Use a temporary directory for casual queries
+    cwd = "/tmp"
+
+    try:
+        prompt = f"""You are a helpful assistant. Please respond to the following query.
+
+Query: {user_text}
+
+IMPORTANT: Write your complete response to the file {output_file}. Use the Write tool to create this file with your response."""
+
+        logger.info(f"Running casual query {query_id}" + (f" (resuming session {existing_session})" if existing_session else ""))
+
+        # Use GENERAL_RULES for casual queries, fall back to empty string
+        system_prompt = config.GENERAL_RULES if config.GENERAL_RULES else ""
+
+        duration_minutes, session_id = await claude.run_claude_query(
+            prompt, system_prompt, cwd,
+            resume=existing_session,
+            project_name="_casual", command="ask", user_prompt=user_text,
+            query_id=query_id
+        )
+
+        # Store thread context for casual conversation continuation
+        claude.set_thread_worktree(
+            thread_key, f"casual-{query_id}", session_id,
+            None, None, "_casual", None  # No worktree for casual queries
+        )
+
+        # Check if output file exists, provide fallback message if not
+        if os.path.exists(output_file):
+            await process_output_file(messenger, context, output_file, duration_minutes)
+        else:
+            await messenger.reply(context, f"Query completed in {duration_minutes:.2f} minutes, but no output file was generated. The assistant may have responded directly in the logs.")
+
+    except asyncio.CancelledError:
+        logger.info(f"Casual query {query_id} was cancelled")
+        await messenger.reply(context, f"Query {query_id} was cancelled.")
+        cleanup_output_file(output_file)
+    except Exception as e:
+        logger.error(f"Error running casual query: {e}")
+        await messenger.reply(context, f"Error: {str(e)}")
+        cleanup_output_file(output_file)
+
+
+async def _continue_in_worktree(messenger, context: dict, user_text: str, worktree_info: dict, thread_key: str) -> None:
+    """Continue conversation in an existing worktree context."""
+    query_id = worktree_info["query_id"]
+    worktree_path = worktree_info["worktree_path"]
+    project_workdir = worktree_info["project_workdir"]
+    project_name = worktree_info["project_name"]
+    project_repo = worktree_info["project_repo"]
+    existing_session = worktree_info.get("session_id")
+
+    # Check if this is a casual conversation context
+    if query_id.startswith("casual-") or project_name == "_casual":
+        logger.info(f"Continuing casual conversation with session {existing_session}")
+        await _ask_casual(messenger, context, user_text, existing_session)
+        return
+
+    logger.info(f"Continuing in worktree {query_id} for project {project_name}")
+
+    # Check if this is from /up command (pseudo worktree) or if worktree doesn't exist
+    is_up_context = query_id.startswith("up-")
+    worktree_exists = worktree_path and os.path.isdir(worktree_path)
+
+    if is_up_context or not worktree_exists:
+        # Need to create a proper worktree for continuation
+        logger.info(f"Worktree doesn't exist or is /up context, creating new worktree")
+        query_id = str(uuid.uuid4())[:8]
+        worktree_path = await git.create_worktree(messenger, context, project_workdir, project_name, query_id)
+        if not worktree_path:
+            await messenger.reply(context, f"Failed to create worktree for continuation in {project_name}")
+            return
+        # Clear session since we're in a new worktree
+        existing_session = None
+
+    await messenger.reply(context, f"Continuing in worktree {query_id} for {project_name}...")
+
+    output_file = f"/tmp/output_{query_id}_cont_{str(uuid.uuid4())[:4]}.txt"
+
+    try:
+        prompt = f"""Project: {project_name}
+Repository: {project_repo}
+Working Directory: {worktree_path}
+
+Task: {user_text}
+
+Write the output in {output_file}"""
+
+        logger.info(f"Running continuation query in worktree {query_id}")
+
+        duration_minutes, session_id = await claude.run_claude_query(
+            prompt, config.FEEDBACK_RULES, worktree_path,
+            resume=existing_session, project_name=project_name, command="continue", user_prompt=user_text,
+            worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
+            keep_worktree=True
+        )
+
+        # Update thread worktree association with new info
+        claude.set_thread_worktree(
+            thread_key, query_id, session_id,
+            worktree_path, project_workdir, project_name, project_repo
+        )
+
+        await process_output_file(messenger, context, output_file, duration_minutes)
+
+    except asyncio.CancelledError:
+        logger.info(f"Continuation query in worktree {query_id} was cancelled")
+        await messenger.reply(context, f"Query in {project_name} was cancelled.")
+        cleanup_output_file(output_file)
+    except Exception as e:
+        logger.error(f"Error running continuation query: {e}")
         await messenger.reply(context, f"Error: {str(e)}")
         cleanup_output_file(output_file)
 
@@ -315,6 +611,9 @@ async def cmd_feat(messenger, context: dict, args: list) -> None:
     if not worktree_path:
         return
 
+    # Get thread key for context association
+    thread_key = get_thread_key(context)
+
     await messenger.reply(context, f"Processing for project: {project_name} (query: {query_id})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
@@ -337,6 +636,13 @@ Write the output in {output_file}"""
             keep_worktree=True  # Keep worktree for potential feedback
         )
         claude.set_session(project_name, session_id)
+
+        # Store thread-worktree association
+        claude.set_thread_worktree(
+            thread_key, query_id, session_id,
+            worktree_path, project_workdir, project_name, project_repo
+        )
+
         await process_output_file(messenger, context, output_file, duration_minutes)
 
     except asyncio.CancelledError:
@@ -382,6 +688,9 @@ async def cmd_fix(messenger, context: dict, args: list) -> None:
     if not worktree_path:
         return
 
+    # Get thread key for context association
+    thread_key = get_thread_key(context)
+
     await messenger.reply(context, f"Processing for project: {project_name} (query: {query_id})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
@@ -404,6 +713,13 @@ Write the output in {output_file}"""
             keep_worktree=True  # Keep worktree for potential feedback
         )
         claude.set_session(project_name, session_id)
+
+        # Store thread-worktree association
+        claude.set_thread_worktree(
+            thread_key, query_id, session_id,
+            worktree_path, project_workdir, project_name, project_repo
+        )
+
         await process_output_file(messenger, context, output_file, duration_minutes)
 
     except asyncio.CancelledError:
@@ -449,6 +765,9 @@ async def cmd_plan(messenger, context: dict, args: list) -> None:
     if not worktree_path:
         return
 
+    # Get thread key for context association
+    thread_key = get_thread_key(context)
+
     await messenger.reply(context, f"Planning for project: {project_name} (query: {query_id})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
@@ -471,6 +790,13 @@ Write the output in {output_file}"""
             keep_worktree=True  # Keep worktree for potential feedback
         )
         claude.set_session(project_name, session_id)
+
+        # Store thread-worktree association
+        claude.set_thread_worktree(
+            thread_key, query_id, session_id,
+            worktree_path, project_workdir, project_name, project_repo
+        )
+
         await process_output_file(messenger, context, output_file, duration_minutes)
 
     except asyncio.CancelledError:
@@ -484,14 +810,38 @@ Write the output in {output_file}"""
 
 
 async def cmd_feedback(messenger, context: dict, args: list) -> None:
-    """Handle /feedback command. Format: /feedback project-name [job-id] prompt"""
-    if len(args) < 2:
-        await messenger.reply(context, "Usage: /feedback project-name [job-id] prompt\n\nUse /status to see available job IDs.")
+    """Handle /feedback command. Format: /feedback [project-name] [job-id] prompt
+
+    If project-name is not provided, uses the project and worktree from thread context.
+    """
+    if len(args) < 1:
+        await messenger.reply(context, "Usage: /feedback [project-name] [job-id] prompt\n\nUse /status to see available job IDs.")
         return
 
-    project_name = args[0]
+    # Try to determine project from args or thread context
+    thread_key = get_thread_key(context)
+    worktree_info = claude.get_thread_worktree(thread_key)
 
-    project = config.get_project(project_name)
+    project_name = None
+    project = None
+    job_id = None
+    user_prompt = None
+    args_index = 0
+
+    # Check if first arg is a project name
+    first_arg = args[0]
+    if config.get_project(first_arg):
+        project_name = first_arg
+        project = config.get_project(project_name)
+        args_index = 1
+    elif worktree_info:
+        # Use thread context for project
+        project_name = worktree_info.get("project_name")
+        project = config.get_project(project_name)
+    else:
+        await messenger.reply(context, f"Project '{first_arg}' not found and no project context in this thread.\n\nAvailable projects: {config.get_available_projects()}")
+        return
+
     if not project:
         await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
         return
@@ -499,19 +849,20 @@ async def cmd_feedback(messenger, context: dict, args: list) -> None:
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
 
-    # Check if second argument is a job ID (8 char hex) or part of the prompt
-    job_id = None
-    if len(args) >= 2:
-        potential_job_id = args[1]
-        # Check if it looks like a job ID (8 hex chars) and exists in completed jobs
+    # Check remaining args for job-id and prompt
+    remaining_args = args[args_index:]
+    if remaining_args:
+        potential_job_id = remaining_args[0]
         if len(potential_job_id) == 8 and claude.get_completed_job(potential_job_id):
             job_id = potential_job_id
-            user_prompt = " ".join(args[2:]) if len(args) > 2 else ""
+            user_prompt = " ".join(remaining_args[1:]) if len(remaining_args) > 1 else ""
         else:
-            user_prompt = " ".join(args[1:])
+            user_prompt = " ".join(remaining_args)
+    else:
+        user_prompt = ""
 
     if not user_prompt:
-        await messenger.reply(context, "Usage: /feedback project-name [job-id] prompt\n\nPlease provide feedback text.")
+        await messenger.reply(context, "Usage: /feedback [project-name] [job-id] prompt\n\nPlease provide feedback text.")
         return
 
     if not await git.clone_repository_if_needed(messenger, context, project_repo, project_workdir):
@@ -520,11 +871,7 @@ async def cmd_feedback(messenger, context: dict, args: list) -> None:
     if not await claude.initialize_claude_md(messenger, context, project_workdir):
         return
 
-    # Try to use existing thread context, fall back to current context
-    stored_context = messenger.get_project_thread(project_name)
-    reply_context = stored_context if stored_context else context
-
-    # Determine worktree and session based on job_id
+    # Determine worktree and session
     if job_id:
         # Use existing job's worktree and session
         job_info = claude.get_completed_job(job_id)
@@ -538,34 +885,37 @@ async def cmd_feedback(messenger, context: dict, args: list) -> None:
 
         worktree_path = job_info.get("worktree_path")
         existing_session = job_info.get("session_id")
-        query_id = job_id  # Reuse the same job ID for continuity
+        query_id = job_id
 
         logger.info(f"Resuming job {job_id} with session {existing_session} in worktree {worktree_path}")
-        await messenger.reply(reply_context, f"Continuing job {job_id} for project: {project_name}...")
+        await messenger.reply(context, f"Continuing job {job_id} for project: {project_name}...")
 
-        # Remove from completed jobs since we're continuing it
         del claude.COMPLETED_JOBS[job_id]
-    else:
-        # Original behavior: use project session and create new worktree
-        existing_session = claude.get_session(project_name)
+    elif worktree_info and worktree_info.get("project_name") == project_name:
+        # Use thread's worktree context
+        worktree_path = worktree_info.get("worktree_path")
+        existing_session = worktree_info.get("session_id")
+        query_id = worktree_info.get("query_id")
 
+        logger.info(f"Using thread worktree {query_id} with session {existing_session}")
+        await messenger.reply(context, f"Continuing in worktree {query_id} for project: {project_name}...")
+    else:
+        # Create new worktree
+        existing_session = claude.get_session(project_name)
         if existing_session:
             logger.info(f"Resuming session {existing_session} for project {project_name}")
         else:
             logger.info(f"No existing session for project {project_name}, starting fresh")
-            messenger.set_thread_context(project_name, context)
-            reply_context = context
 
-        # Generate query ID and create worktree
         query_id = str(uuid.uuid4())[:8]
         worktree_path = await git.create_worktree(messenger, context, project_workdir, project_name, query_id)
         if not worktree_path:
             return
 
         if existing_session:
-            await messenger.reply(reply_context, f"Continuing session for project: {project_name} (query: {query_id})...")
+            await messenger.reply(context, f"Continuing session for project: {project_name} (query: {query_id})...")
         else:
-            await messenger.reply(reply_context, f"No existing session found. Starting new session for project: {project_name} (query: {query_id})...")
+            await messenger.reply(context, f"No existing session found. Starting new session for project: {project_name} (query: {query_id})...")
 
     output_file = f"/tmp/output_{query_id}.txt"
 
@@ -584,18 +934,27 @@ Write the output in {output_file}"""
             prompt, config.FEEDBACK_RULES, worktree_path,
             resume=existing_session, project_name=project_name, command="feedback", user_prompt=user_prompt,
             worktree_path=worktree_path, project_workdir=project_workdir, query_id=query_id,
-            keep_worktree=True  # Keep for potential further feedback
+            keep_worktree=True
         )
+
+        # Update session for future commands
         claude.set_session(project_name, session_id)
-        await process_output_file(messenger, reply_context, output_file, duration_minutes)
+
+        # Update thread-worktree association
+        claude.set_thread_worktree(
+            thread_key, query_id, session_id,
+            worktree_path, project_workdir, project_name, project_repo
+        )
+
+        await process_output_file(messenger, context, output_file, duration_minutes)
 
     except asyncio.CancelledError:
         logger.info(f"Query {query_id} for project {project_name} was cancelled")
-        await messenger.reply(reply_context, f"Query {query_id} for {project_name} was cancelled.")
+        await messenger.reply(context, f"Query {query_id} for {project_name} was cancelled.")
         cleanup_output_file(output_file)
     except Exception as e:
         logger.error(f"Error running query: {e}")
-        await messenger.reply(reply_context, f"Error: {str(e)}")
+        await messenger.reply(context, f"Error: {str(e)}")
         cleanup_output_file(output_file)
 
 
@@ -615,6 +974,8 @@ async def cmd_init(messenger, context: dict, args: list) -> None:
     project_repo = project['project_repo']
     project_workdir = project['project_workdir']
     project_up = project.get('project_up')
+    project_endpoint_url = project.get('project_endpoint_url')
+    project_ports = project.get('project_ports')
 
     if not await git.clone_repository_if_needed(messenger, context, project_repo, project_workdir):
         return
@@ -622,7 +983,10 @@ async def cmd_init(messenger, context: dict, args: list) -> None:
     init_success = await claude.initialize_claude_md(messenger, context, project_workdir)
 
     if project_up:
-        await process.spin_up_project(messenger, context, project_name, project_workdir, project_up)
+        # Clean up workdir and pull from main before spinning up
+        if not await git.refresh_to_main_branch(messenger, context, project_workdir):
+            return
+        await process.spin_up_project(messenger, context, project_name, project_workdir, project_up, project_endpoint_url, project_ports)
 
     if not init_success:
         await messenger.reply(context, f"Failed to initialize CLAUDE.md for project: {project_name}")
@@ -632,42 +996,95 @@ async def cmd_init(messenger, context: dict, args: list) -> None:
 
 
 async def cmd_up(messenger, context: dict, args: list) -> None:
-    """Handle /up command. Format: /up project-name"""
-    if len(args) < 1:
-        await messenger.reply(context, "Usage: /up project-name")
-        return
+    """Handle /up command. Format: /up [project-name]
 
-    project_name = args[0]
+    If project-name is not provided, uses the project from thread context.
+    """
+    # Get project name from args or thread context
+    project_name = None
+    project = None
 
-    project = config.get_project(project_name)
-    if not project:
-        await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+    if args and len(args) >= 1:
+        project_name = args[0]
+        project = config.get_project(project_name)
+        if not project:
+            await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+            return
+    else:
+        # Try to get project from thread context
+        thread_key = get_thread_key(context)
+        worktree_info = claude.get_thread_worktree(thread_key)
+        if worktree_info:
+            project_name = worktree_info.get("project_name")
+            project = config.get_project(project_name)
+
+    if not project_name or not project:
+        await messenger.reply(context, "Usage: /up [project-name]\n\nNo project specified and no project context in this thread.")
         return
 
     project_workdir = project['project_workdir']
     project_up = project.get('project_up')
+    project_endpoint_url = project.get('project_endpoint_url')
+    project_ports = project.get('project_ports')
+    project_repo = project.get('project_repo')
 
     if not project_up:
         await messenger.reply(context, f"No project_up command configured for {project_name}")
         return
 
-    await process.spin_up_project(messenger, context, project_name, project_workdir, project_up)
+    # Get current thread key
+    thread_key = get_thread_key(context)
+
+    # Clear any existing thread associations for this project from other threads
+    for existing_key, info in list(claude.get_all_thread_worktrees().items()):
+        if info.get("project_name") == project_name and existing_key != thread_key:
+            claude.clear_thread_worktree(existing_key)
+            logger.info(f"Cleared old thread association {existing_key} for project {project_name}")
+
+    # Clean up workdir and pull from main before spinning up
+    if not await git.refresh_to_main_branch(messenger, context, project_workdir):
+        return
+
+    await process.spin_up_project(messenger, context, project_name, project_workdir, project_up, project_endpoint_url, project_ports)
+
+    # Associate this thread with the project
+    claude.set_thread_worktree(
+        thread_key, f"up-{project_name}", None,
+        project_workdir, project_workdir, project_name, project_repo
+    )
 
 
 async def cmd_stop(messenger, context: dict, args: list) -> None:
-    """Handle /stop command. Format: /stop project-name"""
-    if len(args) < 1:
-        await messenger.reply(context, "Usage: /stop project-name")
-        return
+    """Handle /stop command. Format: /stop [project-name]
 
-    project_name = args[0]
+    If project-name is not provided, uses the project from thread context.
+    """
+    # Get project name from args or thread context
+    project_name = None
 
-    project = config.get_project(project_name)
-    if not project:
-        await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+    if args and len(args) >= 1:
+        project_name = args[0]
+        project = config.get_project(project_name)
+        if not project:
+            await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
+            return
+    else:
+        # Try to get project from thread context
+        thread_key = get_thread_key(context)
+        worktree_info = claude.get_thread_worktree(thread_key)
+        if worktree_info:
+            project_name = worktree_info.get("project_name")
+
+    if not project_name:
+        await messenger.reply(context, "Usage: /stop [project-name]\n\nNo project specified and no project context in this thread.")
         return
 
     await process.kill_project_process(messenger, context, project_name)
+
+
+async def cmd_down(messenger, context: dict, args: list) -> None:
+    """Handle /down command. Alias for /stop. Format: /down project-name"""
+    await cmd_stop(messenger, context, args)
 
 
 async def cmd_status(messenger, context: dict, args: list) -> None:
@@ -736,34 +1153,55 @@ async def cmd_status(messenger, context: dict, args: list) -> None:
 
 
 async def cmd_cancel(messenger, context: dict, args: list) -> None:
-    """Handle /cancel command. Format: /cancel [project-name] [query-id]"""
-    if not args:
-        # Cancel all queries across all projects
+    """Handle /cancel command. Format: /cancel [project-name] [query-id]
+
+    If no args and thread has context, cancel queries for that project.
+    If no args and no thread context, cancel all running queries.
+    """
+    project_name = None
+    query_id = None
+
+    if args and len(args) >= 1:
+        # Check if first arg is a project name or query ID
+        potential_project = args[0]
+        if config.get_project(potential_project):
+            project_name = potential_project
+            query_id = args[1] if len(args) > 1 else None
+        else:
+            # First arg might be a query ID if thread has context
+            thread_key = get_thread_key(context)
+            worktree_info = claude.get_thread_worktree(thread_key)
+            if worktree_info:
+                project_name = worktree_info.get("project_name")
+                query_id = potential_project  # Treat first arg as query ID
+            else:
+                await messenger.reply(context, f"Project '{potential_project}' not found. Available projects: {config.get_available_projects()}")
+                return
+    else:
+        # No args - try thread context first
+        thread_key = get_thread_key(context)
+        worktree_info = claude.get_thread_worktree(thread_key)
+        if worktree_info:
+            project_name = worktree_info.get("project_name")
+            query_id = worktree_info.get("query_id")
+
+    # If still no project, cancel all
+    if not project_name:
         running = claude.get_all_running_queries()
         if not running:
             await messenger.reply(context, "No running queries to cancel.")
             return
 
         all_cancelled = []
-        for project_name in list(running.keys()):
-            cancelled = claude.cancel_query(project_name)
-            all_cancelled.extend([f"{project_name}:{qid}" for qid in cancelled])
+        for pname in list(running.keys()):
+            cancelled = claude.cancel_query(pname)
+            all_cancelled.extend([f"{pname}:{qid}" for qid in cancelled])
 
         if all_cancelled:
             await messenger.reply(context, f"Cancelled {len(all_cancelled)} queries: {', '.join(all_cancelled)}")
         else:
             await messenger.reply(context, "No queries were cancelled.")
         return
-
-    project_name = args[0]
-
-    project = config.get_project(project_name)
-    if not project:
-        await messenger.reply(context, f"Project '{project_name}' not found. Available projects: {config.get_available_projects()}")
-        return
-
-    # Check if a specific query ID was provided
-    query_id = args[1] if len(args) > 1 else None
 
     queries = claude.get_running_queries_for_project(project_name)
     if not queries:
@@ -791,20 +1229,43 @@ async def cmd_cancel(messenger, context: dict, args: list) -> None:
 
 
 async def cmd_log(messenger, context: dict, args: list) -> None:
-    """Handle /log command. Format: /log project-name [lines]"""
-    if len(args) < 1:
-        await messenger.reply(context, "Usage: /log project-name [lines]\nDefault: 50 lines")
-        return
+    """Handle /log command. Format: /log [project-name] [lines]
 
-    project_name = args[0]
-
+    If project-name is not provided, uses the project from thread context.
+    """
+    project_name = None
     lines = 50
-    if len(args) >= 2:
-        try:
-            lines = int(args[1])
-            lines = min(max(lines, 1), 200)
-        except ValueError:
-            await messenger.reply(context, "Invalid number of lines. Using default (50).")
+
+    if args and len(args) >= 1:
+        # Check if first arg is a project name or number of lines
+        first_arg = args[0]
+        if config.get_project(first_arg):
+            project_name = first_arg
+            if len(args) >= 2:
+                try:
+                    lines = int(args[1])
+                    lines = min(max(lines, 1), 200)
+                except ValueError:
+                    await messenger.reply(context, "Invalid number of lines. Using default (50).")
+        else:
+            # First arg might be lines if thread has context
+            try:
+                lines = int(first_arg)
+                lines = min(max(lines, 1), 200)
+            except ValueError:
+                await messenger.reply(context, f"Project '{first_arg}' not found. Available projects: {config.get_available_projects()}")
+                return
+
+    # If no project name, try thread context
+    if not project_name:
+        thread_key = get_thread_key(context)
+        worktree_info = claude.get_thread_worktree(thread_key)
+        if worktree_info:
+            project_name = worktree_info.get("project_name")
+
+    if not project_name:
+        await messenger.reply(context, "Usage: /log [project-name] [lines]\n\nNo project specified and no project context in this thread.")
+        return
 
     project = config.get_project(project_name)
     if not project:

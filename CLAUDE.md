@@ -67,6 +67,8 @@ projects:
     project_workdir: "/path/to/workdir"
     project_up: "make run"      # Optional: command to start project
     project_reset: "make purge" # Optional: command to reset project
+    project_endpoint_url: "https://myapp.example.com"  # Optional: URL shown when project starts
+    project_ports: ["3000", "8080"]  # Optional: ports to free up before starting (kills occupying processes)
 ```
 
 **Authorization**:
