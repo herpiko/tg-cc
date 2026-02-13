@@ -3,6 +3,8 @@
 import logging
 import os
 import re
+from datetime import timezone, timedelta
+
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -17,6 +19,13 @@ PLAN_RULES = ""
 FEEDBACK_RULES = ""
 GENERAL_RULES = ""
 WORKTREE_BASE = "/tmp/ccc-worktrees"  # Base directory for git worktrees
+
+# Reminders configuration
+REMINDERS = []  # List of parsed reminder dicts
+
+# MCP integration configuration
+MCP_SERVERS = {}    # dict[str, McpServerConfig] built from integrations
+ALLOWED_TOOLS = []  # list[str] tool patterns from integrations
 
 # Telegram-specific configuration
 TELEGRAM_BOT_TOKEN = ""
@@ -37,6 +46,7 @@ def load_config(config_path: str = None):
     global PROJECTS, AUTHORIZED_USERS, TELEGRAM_AUTHORIZED_GROUPS
     global ASK_RULES, FEAT_RULES, FIX_RULES, PLAN_RULES, FEEDBACK_RULES, GENERAL_RULES
     global TELEGRAM_BOT_TOKEN, WORKTREE_BASE
+    global MCP_SERVERS, ALLOWED_TOOLS, REMINDERS
     global LARK_APP_ID, LARK_APP_SECRET, LARK_VERIFICATION_TOKEN, LARK_ENCRYPT_KEY
     global LARK_WEBHOOK_PORT, LARK_AUTHORIZED_CHATS, LARK_DOCUMENTS
 
@@ -58,6 +68,16 @@ def load_config(config_path: str = None):
             PLAN_RULES = data.get('plan_rules', '')
             FEEDBACK_RULES = data.get('feedback_rules', '')
             WORKTREE_BASE = data.get('worktree_base', '/tmp/ccc-worktrees')
+
+            # MCP integrations
+            raw_integrations = data.get('integrations', [])
+            if raw_integrations:
+                from .integrations import build_mcp_config
+                config_dir = os.path.dirname(os.path.abspath(config_path))
+                MCP_SERVERS, ALLOWED_TOOLS = build_mcp_config(raw_integrations, config_dir)
+
+            # Reminders
+            REMINDERS = _parse_reminders(data.get('reminders', []))
 
             # Telegram configuration
             telegram_config = data.get('telegram', {})
@@ -124,6 +144,27 @@ def load_config(config_path: str = None):
                 for doc in LARK_DOCUMENTS:
                     logger.info(f"  - {doc['name']} ({doc['type']}): {doc['token'][:10]}...")
 
+            if MCP_SERVERS:
+                names = ", ".join(MCP_SERVERS.keys())
+                logger.info(f"Loaded {len(MCP_SERVERS)} MCP integration(s): {names}")
+                for sname, sconfig in MCP_SERVERS.items():
+                    logger.info(f"  MCP [{sname}]: command={sconfig.get('command', 'N/A')}, args={sconfig.get('args', [])}")
+                    for ek, ev in sconfig.get("env", {}).items():
+                        logger.info(f"    env {ek}={ev}")
+                logger.info(f"  Allowed tool patterns: {ALLOWED_TOOLS}")
+
+                # Validate MCP prerequisites
+                from .integrations import validate_integrations
+                issues = validate_integrations()
+                for issue in issues:
+                    logger.warning(f"  MCP ISSUE: {issue}")
+
+            if REMINDERS:
+                logger.info(f"Loaded {len(REMINDERS)} reminder(s)")
+                for i, r in enumerate(REMINDERS):
+                    days = ", ".join(r["repeat"])
+                    logger.info(f"  [{i}] {r['time']} ({days}): {r['prompt'][:60]}...")
+
     except Exception as e:
         logger.error(f"Error loading config from {config_path}: {e}")
         PROJECTS = []
@@ -145,6 +186,52 @@ def _normalize_authorized_users(raw_users: list) -> list[dict]:
         else:
             # Plain string: treat as username only
             result.append({"username": str(entry), "lark_ouid": "", "name": "", "email": ""})
+    return result
+
+
+def _parse_reminders(raw_reminders: list) -> list[dict]:
+    """Parse reminders config into list of dicts with parsed time components.
+
+    Each reminder: {"time": str, "prompt": str, "repeat": [str], "parsed_hour": int, "parsed_minute": int, "parsed_tz": timezone}
+    """
+    result = []
+    for entry in raw_reminders:
+        time_str = entry.get("time", "")
+        prompt = entry.get("prompt", "")
+        repeat = entry.get("repeat", [])
+
+        if not time_str or not prompt:
+            logger.warning(f"Skipping reminder with missing time or prompt: {entry}")
+            continue
+
+        # Normalize repeat days to lowercase
+        repeat = [d.lower() for d in repeat]
+
+        # Parse time string: "HH:MM+N" or "HH:MM-N"
+        match = re.match(r'^(\d{1,2}):(\d{2})([+-]\d{1,2})$', time_str)
+        if not match:
+            logger.warning(f"Skipping reminder with invalid time format '{time_str}' (expected HH:MM+N or HH:MM-N)")
+            continue
+
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        offset_hours = int(match.group(3))
+
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            logger.warning(f"Skipping reminder with invalid time values: {time_str}")
+            continue
+
+        tz = timezone(timedelta(hours=offset_hours))
+
+        result.append({
+            "time": time_str,
+            "prompt": prompt,
+            "repeat": repeat,
+            "parsed_hour": hour,
+            "parsed_minute": minute,
+            "parsed_tz": tz,
+        })
+
     return result
 
 

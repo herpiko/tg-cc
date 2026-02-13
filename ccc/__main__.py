@@ -87,6 +87,11 @@ def main():
         logger.error("No bots configured. Please add telegram_bot_token or lark configuration to config.yaml")
         return
 
+    # Start scheduler if reminders are configured
+    if config.REMINDERS:
+        from ccc.scheduler import start_scheduler_thread
+        start_scheduler_thread()
+
     # Start all bot threads
     for thread in threads:
         logger.info(f"Starting {thread.name}...")

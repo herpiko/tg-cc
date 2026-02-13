@@ -76,18 +76,43 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
     # Build MCP servers for Claude agent
     mcp_servers = _build_mcp_servers()
 
+    # Merge with config MCP servers (from integrations)
+    if config.MCP_SERVERS:
+        mcp_servers.update(config.MCP_SERVERS)
+
+    # Build effective system prompt with global rules
+    effective_system_prompt = system_prompt or ""
+
+    # Chat formatting rules (Telegram and Lark cannot render markdown tables)
+    formatting_rules = (
+        "FORMATTING: Never use markdown tables in your responses. "
+        "Convert any tabular data to a simple list or indented text instead, "
+        "because the chat platforms (Telegram, Lark) cannot render markdown tables."
+    )
+    effective_system_prompt = f"{effective_system_prompt}\n\n{formatting_rules}" if effective_system_prompt else formatting_rules
+
+    # Append MCP integration descriptions so the model knows what tools are available
+    if config.MCP_SERVERS:
+        from .integrations import get_integration_descriptions
+        integration_info = get_integration_descriptions()
+        if integration_info:
+            effective_system_prompt = f"{effective_system_prompt}\n\n{integration_info}"
+
     options = ClaudeAgentOptions(
         model='opus',
-        system_prompt=system_prompt,
+        system_prompt=effective_system_prompt,
         permission_mode='bypassPermissions',
         cwd=cwd,
         setting_sources=["project"],
         resume=resume,
         max_buffer_size=10 * 1024 * 1024,  # 10MB to handle large git diffs
         mcp_servers=mcp_servers,
+        allowed_tools=config.ALLOWED_TOOLS if config.ALLOWED_TOOLS else [],
     )
 
     logger.info(f"Starting Claude query in {cwd}" + (f" (resuming session {resume})" if resume else ""))
+    if config.MCP_SERVERS:
+        logger.info(f"MCP servers attached: {list(config.MCP_SERVERS.keys())}, allowed_tools: {config.ALLOWED_TOOLS}")
 
     # Track the current task if project_name is provided
     if project_name:

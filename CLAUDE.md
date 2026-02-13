@@ -82,6 +82,25 @@ lark:
   webhook_port: 8080
   authorized_chats: ["oc_xxx"]  # Lark chat_ids
 
+# MCP integrations (optional, global scope - applies to all projects)
+integrations:
+  # Known integration shorthand (e.g. gspreadsheet)
+  - mcp: gspreadsheet
+    service_account: "/path/to/service-account.json"
+    drive_folder_id: "optional_folder_id"       # optional
+  # Generic/custom MCP server (stdio)
+  - mcp: my-custom-server
+    command: "npx"
+    args: ["-y", "@example/mcp-server"]
+    env:
+      API_KEY: "xxx"
+
+# Scheduled reminders (optional)
+reminders:
+  - time: "11:00+7"        # HH:MM with UTC offset (+N or -N)
+    prompt: "The prompt to send to Claude"
+    repeat: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
+
 # Project configuration
 projects:
   - project_name: "name"
@@ -114,6 +133,8 @@ ccc/
 ├── claude.py             # Claude SDK operations (platform-agnostic)
 ├── git.py                # Git operations (platform-agnostic)
 ├── process.py            # Process management (platform-agnostic)
+├── integrations.py       # MCP server integration builders
+├── scheduler.py          # Scheduled reminder system (daemon thread)
 ├── messenger.py          # Abstract messenger interface
 ├── telegram/             # Telegram-specific implementation
 │   ├── __init__.py
@@ -141,6 +162,8 @@ ccc/
    - `claude.py`: Claude SDK query execution, session management
    - `git.py`: Repository cloning, branch management
    - `process.py`: Project spin-up/shutdown, log management
+   - `integrations.py`: MCP server integration builders (known + generic)
+   - `scheduler.py`: Scheduled reminders — runs in a daemon thread, fires Claude queries at configured times, sends results to all active chats, and stores thread context for user replies
 
 4. **Platform Implementations**:
    - `telegram/`: python-telegram-bot based implementation

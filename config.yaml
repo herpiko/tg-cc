@@ -121,6 +121,34 @@ lark:
   webhook_port: 8080
   authorized_chats: ["oc_xxx"]  # Lark chat_ids
 
+# MCP integrations (optional)
+# integrations:
+#   # Google Sheets integration (known shorthand)
+#   - mcp: gspreadsheet
+#     service_account: "/path/to/service-account.json"
+#     drive_folder_id: "optional_folder_id"       # optional
+#
+#   # Generic/custom MCP server (stdio)
+#   - mcp: my-custom-server
+#     command: "npx"
+#     args: ["-y", "@example/mcp-server"]
+#     env:
+#       API_KEY: "xxx"
+#
+#   # Generic MCP server (SSE/HTTP)
+#   - mcp: my-sse-server
+#     url: "https://example.com/sse"
+#     type: "sse"  # or "http"
+
+# Scheduled reminders (optional)
+# reminders:
+#   - time: "11:00+7"        # HH:MM with UTC offset (+N or -N)
+#     prompt: "Your prompt to send to Claude"
+#     repeat: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
+#   - time: "09:00-5"
+#     prompt: "Another reminder"
+#     repeat: ['monday', 'wednesday', 'friday']
+
 # Project configuration
 projects:
   - project_name: "my-project"
