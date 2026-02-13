@@ -32,8 +32,8 @@ pull: ## Pull the Docker image from Docker Hub
 run: run-native ## Start the bot natively (alias for run-native)
 
 run-native: ## Start the bot natively using Python
-	@echo "Starting tgcc bot natively..."
-	./tgcc
+	@echo "Starting ccc bot natively..."
+	python3 -m ccc -c config.yaml
 
 run-docker: ## Start the bot using Docker Compose
 	@echo "Starting tgcc bot in Docker..."

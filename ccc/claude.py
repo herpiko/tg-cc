@@ -19,9 +19,24 @@ from claude_agent_sdk import (
     ToolResultBlock
 )
 
+from . import config
 from .messenger import Messenger
 
 logger = logging.getLogger(__name__)
+
+
+def _build_mcp_servers() -> dict:
+    """Build MCP server configs for Claude agent options."""
+    servers = {}
+
+    if config.LARK_APP_ID and config.LARK_DOCUMENTS:
+        from .lark_mcp import create_lark_mcp_server
+        servers["lark-documents"] = create_lark_mcp_server(
+            config.LARK_APP_ID, config.LARK_APP_SECRET, config.LARK_DOCUMENTS
+        )
+        logger.info(f"Lark MCP server added with {len(config.LARK_DOCUMENTS)} document(s)")
+
+    return servers
 
 
 # Session storage for conversation continuity: {project_name: session_id}
@@ -58,6 +73,9 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
     if not query_id:
         query_id = str(uuid.uuid4())[:8]  # Short ID for easier reference
 
+    # Build MCP servers for Claude agent
+    mcp_servers = _build_mcp_servers()
+
     options = ClaudeAgentOptions(
         model='opus',
         system_prompt=system_prompt,
@@ -65,7 +83,8 @@ async def run_claude_query(prompt: str, system_prompt: str, cwd: str, resume: st
         cwd=cwd,
         setting_sources=["project"],
         resume=resume,
-        max_buffer_size=10 * 1024 * 1024  # 10MB to handle large git diffs
+        max_buffer_size=10 * 1024 * 1024,  # 10MB to handle large git diffs
+        mcp_servers=mcp_servers,
     )
 
     logger.info(f"Starting Claude query in {cwd}" + (f" (resuming session {resume})" if resume else ""))

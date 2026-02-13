@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ LARK_VERIFICATION_TOKEN = ""
 LARK_ENCRYPT_KEY = ""
 LARK_WEBHOOK_PORT = 8080
 LARK_AUTHORIZED_CHATS = []  # List of Lark chat_ids
+LARK_DOCUMENTS = []  # List of dicts: [{"name": "...", "type": "doc"|"spreadsheet", "token": "..."}]
 
 
 def load_config(config_path: str = None):
@@ -36,7 +38,7 @@ def load_config(config_path: str = None):
     global ASK_RULES, FEAT_RULES, FIX_RULES, PLAN_RULES, FEEDBACK_RULES, GENERAL_RULES
     global TELEGRAM_BOT_TOKEN, WORKTREE_BASE
     global LARK_APP_ID, LARK_APP_SECRET, LARK_VERIFICATION_TOKEN, LARK_ENCRYPT_KEY
-    global LARK_WEBHOOK_PORT, LARK_AUTHORIZED_CHATS
+    global LARK_WEBHOOK_PORT, LARK_AUTHORIZED_CHATS, LARK_DOCUMENTS
 
     if config_path is None:
         config_path = os.path.join(os.path.dirname(__file__), "..", "config.yaml")
@@ -86,6 +88,9 @@ def load_config(config_path: str = None):
                 LARK_WEBHOOK_PORT = lark_config.get('webhook_port', 8080)
                 LARK_AUTHORIZED_CHATS = lark_config.get('authorized_chats', [])
 
+            # Lark documents configuration
+            LARK_DOCUMENTS = _parse_lark_documents(data.get('lark_documents', []))
+
             # Logging
             logger.info(f"Loaded {len(PROJECTS)} projects from {config_path}")
             logger.info(f"Worktree base: {WORKTREE_BASE}")
@@ -113,6 +118,11 @@ def load_config(config_path: str = None):
                 logger.info(f"  - {lark_user_count} users with Lark open_id")
                 logger.info(f"  - {len(LARK_AUTHORIZED_CHATS)} authorized chats")
                 logger.info(f"  - Webhook port: {LARK_WEBHOOK_PORT}")
+
+            if LARK_DOCUMENTS:
+                logger.info(f"Loaded {len(LARK_DOCUMENTS)} Lark documents")
+                for doc in LARK_DOCUMENTS:
+                    logger.info(f"  - {doc['name']} ({doc['type']}): {doc['token'][:10]}...")
 
     except Exception as e:
         logger.error(f"Error loading config from {config_path}: {e}")
@@ -175,6 +185,49 @@ def get_project(project_name: str) -> dict | None:
 def get_available_projects() -> str:
     """Get comma-separated list of available project names."""
     return ", ".join([p['project_name'] for p in PROJECTS])
+
+
+def _parse_lark_documents(raw_docs: list) -> list[dict]:
+    """Parse lark_documents config entries, extracting tokens from URLs."""
+    result = []
+    for entry in raw_docs:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name", "")
+        doc_type = entry.get("type", "doc")
+        token = entry.get("token", "")
+
+        if not token and entry.get("url"):
+            token = _extract_token_from_url(entry["url"])
+
+        if name and token:
+            result.append({"name": name, "type": doc_type, "token": token})
+        else:
+            logger.warning(f"Skipping lark_documents entry with missing name or token: {entry}")
+    return result
+
+
+def _extract_token_from_url(url: str) -> str:
+    """Extract document/spreadsheet token from a Lark/Feishu URL.
+
+    Supports URLs like:
+      https://xxx.larksuite.com/docx/XXXXX
+      https://xxx.feishu.cn/docx/XXXXX
+      https://xxx.larksuite.com/sheets/XXXXX
+      https://xxx.feishu.cn/sheets/XXXXX?query=...
+    """
+    match = re.search(r'/(docx|sheets|wiki|base)/([A-Za-z0-9]+)', url)
+    if match:
+        return match.group(2)
+    return ""
+
+
+def get_lark_document(name: str) -> dict | None:
+    """Find a Lark document by name."""
+    for doc in LARK_DOCUMENTS:
+        if doc["name"] == name:
+            return doc
+    return None
 
 
 # Telegram-specific helpers
